@@ -1,0 +1,786 @@
+from __future__ import annotations
+
+import ast
+import datetime
+import logging
+import math
+import random
+import re
+import string
+from typing import Optional
+
+from clickhouse_worker import (
+    ClickHouseQueryError,
+    clickhouse_string_literal as _clickhouse_string_literal,
+    create_client,
+    execute_sql,
+    execute_sql_modify,
+    insert_dataframe,
+    pandas_to_clickhouse_types,
+)
+import numpy as np
+import pandas as pd
+
+from .config import ExperimentCalculatorConfig
+
+
+logger = logging.getLogger(__name__)
+
+
+def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
+    return config or ExperimentCalculatorConfig.from_env()
+
+
+def generate_random_id(length: int = 8) -> str:
+    return "".join(random.choices(string.ascii_letters + string.digits, k=length))
+
+
+def get_query(query_name: str, params: Optional[dict] = None, *, config: Optional[ExperimentCalculatorConfig] = None) -> str:
+    cfg = get_config(config)
+    sql_req = (cfg.queries_dir / f"{query_name}.sql").read_text(encoding="utf-8")
+    return sql_req.format(**params) if params else sql_req
+
+
+def create_table_sql(
+    table_name: str,
+    *,
+    schema: str,
+    partition: str,
+    sorting: str,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    return get_query(
+        "create_table_template",
+        params={
+            "full_table_name": cfg.full_table(table_name),
+            "cluster": cfg.cluster,
+            "zookeeper_path": cfg.zookeeper_path(table_name),
+            "schema": schema,
+            "partition": partition,
+            "sorting": sorting,
+        },
+        config=cfg,
+    )
+
+
+def drop_exp_partitions(
+    exp_id: int,
+    client_name: str,
+    segment: str,
+    table_name: str = "ug_exp_results",
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    table = cfg.physical_table(table_name)
+
+    partitions_sql = f"""
+    SELECT DISTINCT
+        partition
+    FROM clusterAllReplicas('{cfg.cluster}', system.parts)
+    WHERE database = '{cfg.database}'
+      AND table = '{table}'
+      AND active
+      AND partition LIKE '%,{exp_id},''{client_name}'',''{segment}'')'
+    ORDER BY partition
+    """
+
+    client = create_client()
+    try:
+        partitions = client.query(partitions_sql).result_rows
+
+        if not partitions:
+            logger.info(
+                "No active partitions found for exp_id=%s, client=%s, segment=%s, table=%s",
+                exp_id,
+                client_name,
+                segment,
+                table,
+            )
+            return
+
+        for (partition,) in partitions:
+            year_month, partition_exp_id, partition_client_name, partition_segment = partition.strip("()").split(",")
+
+            drop_sql = f"""
+            ALTER TABLE {cfg.database}.{table}
+            ON CLUSTER {cfg.cluster}
+            DROP PARTITION ({year_month}, {partition_exp_id}, {partition_client_name}, {partition_segment})
+            """
+
+            logger.info(
+                "Drop partition: (%s, %s, %s, %s)",
+                year_month,
+                partition_exp_id,
+                partition_client_name,
+                partition_segment,
+            )
+            client.command(drop_sql)
+    except ValueError as exc:
+        raise ClickHouseQueryError(f"Invalid response: {exc}") from exc
+    except Exception as exc:
+        raise ClickHouseQueryError(f"Unexpected error: {exc}") from exc
+    finally:
+        client.close()
+
+
+def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    string_columns = [
+        "dt",
+        "metric",
+        "variation_pair",
+        "numerator",
+        "denominator",
+        "variance",
+        "distribution",
+        "percentage",
+        "client",
+        "segment",
+    ]
+
+    int_columns = [
+        "control_variation",
+        "test_variation",
+        "exp_id",
+        "variation",
+        "members",
+        "install_cnt",
+        "subscriber_cnt",
+        "otp_owner_cnt",
+        "access_owner_cnt",
+        "access_instant_cnt",
+        "access_ex_trial_cnt",
+        "access_trial_cnt",
+        "trial_subscriber_cnt",
+        "active_trial_cnt",
+        "access_otp_cnt",
+        "subscriptions_cnt",
+        "access_cnt",
+        "charged_trial_cnt",
+        "any_charged_trial_cnt",
+        "active_charged_trial_cnt",
+        "cancel_trial_cnt",
+        "trial_buyer_cnt",
+        "late_charged_cnt",
+        "subscribe_buyer_cnt",
+        "buyer_cnt",
+        "subscription_charge_cnt",
+        "charge_cnt",
+        "refund_14d_cnt",
+        "recurrent_charge_cnt",
+        "upgrade_cnt",
+        "upgrade_revenue",
+        "cancel_14d_cnt",
+        "cancel_1m_cnt",
+    ]
+
+    float_columns = [
+        "mean_0",
+        "mean_1",
+        "mean_diff",
+        "ci_low",
+        "ci_high",
+        "pvalue",
+        "lift",
+        "revenue",
+        "refund_revenue",
+        "recurrent_revenue",
+        "trial_revenue",
+        "active_trial_revenue",
+        "lifetime_revenue",
+        "arpu_var",
+        "lifetime_arpu_var",
+        "arppu_var",
+        "subscriptions_per_user_var",
+        "value",
+    ]
+
+    for col in string_columns:
+        if col in df.columns:
+            df[col] = df[col].replace({np.nan: ""}).fillna("").astype(str)
+
+    for col in int_columns:
+        if col in df.columns:
+            df[col] = df[col].replace({np.nan: 0}).fillna(0).astype("int64")
+
+    for col in float_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
+
+    return df
+
+
+def insert_df_by_chunks(table_name: str, df: pd.DataFrame, chunk_size: int = 1000) -> None:
+    prepared_df = prepare_df_for_clickhouse(df)
+    total = len(prepared_df)
+
+    for start in range(0, total, chunk_size):
+        end = min(start + chunk_size, total)
+        chunk = prepared_df.iloc[start:end].copy()
+        logger.info("Insert rows %s - %s / %s into %s", start, end, total, table_name)
+        insert_dataframe(table_name, chunk)
+
+
+def parse_configuration_project(row) -> str:
+    text = str(row)
+    project = ""
+
+    match_project = re.search(r'project:\s*"?([^",\s]+)"?', text)
+    if match_project:
+        project = match_project.group(1)
+    else:
+        match_url = re.search(r"https?://[^\s,\"]+", text)
+        if match_url:
+            project = match_url.group(0)
+
+    if project:
+        project = project.split("#")[0]
+
+    return project
+
+
+def parse_configuration_segments(row) -> dict:
+    default_segments = {"Total": {"pro_rights": "All"}}
+    text = str(row)
+    if not text or "segments:" not in text:
+        return default_segments
+
+    start_match = re.search(r"segments:\s*", text)
+    if not start_match:
+        return default_segments
+
+    first_brace = text.find("{", start_match.end())
+    if first_brace == -1:
+        return default_segments
+
+    depth = 0
+    for index in range(first_brace, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+
+            if depth == 0:
+                dict_str = text[first_brace:index + 1]
+                try:
+                    return ast.literal_eval(dict_str)
+                except Exception:
+                    return default_segments
+
+    return default_segments
+
+
+def get_exps_list(domain: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:
+    query = get_query("get_ug_exps_ids_to_calc", params={"domain": domain}, config=config)
+    df = execute_sql(query)
+    return df["id"].tolist()
+
+
+def get_ugm_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:
+    return get_exps_list("UG Monetization", config=config)
+
+
+def get_ugp_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:
+    return get_exps_list("UG Product", config=config)
+
+
+def get_ugg_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:
+    return get_exps_list("UG Growth", config=config)
+
+
+def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -> dict:
+    query = get_query("get_ug_exp_info", params={"id": id}, config=config)
+    df = execute_sql(query)
+    clients_pattern = r"(\w+)"
+    df["clients_list"] = df.clients.apply(lambda x: re.findall(clients_pattern, x))
+    exp_info = {
+        "id": df.id[0],
+        "date_start": df.date_start[0],
+        "date_end": df.date_end[0],
+        "variations": df.variations[0],
+        "experiment_event_start": df.experiment_event_start[0],
+        "configuration": df.configuration[0],
+        "clients_list": df.clients_list[0],
+        "clients_options": df.clients_options[0],
+    }
+    exp_info["project"] = parse_configuration_project(exp_info["configuration"])
+    exp_info["segments"] = parse_configuration_segments(exp_info["configuration"])
+
+    logger.info("exp_info: %s", exp_info)
+    return exp_info
+
+
+def generate_sql_rights_filter(rights_type: str, rights: str) -> str:
+    rights_level_list = ["pro", "edu", "sing", "practice", "book"]
+    rights_level = int(math.pow(10, rights_level_list.index(rights_type)))
+    rights_dict = {
+        "empty": f"toUInt32(rights / {rights_level}) % 10 = 0",
+        "free": f"toUInt32(rights / {rights_level}) % 10 in (0, 4, 5)",
+        "finite subscription": f"toUInt32(rights / {rights_level}) % 10 in (1, 2)",
+        "lifetime": f"toUInt32(rights / {rights_level}) % 10 in (3)",
+        "any paid": f"toUInt32(rights / {rights_level}) % 10 in (2, 3)",
+        "any subscription": f"toUInt32(rights / {rights_level}) % 10 in (1, 2, 3)",
+        "trial": f"toUInt32(rights / {rights_level}) % 10 in (1)",
+        "expired subscription": f"toUInt32(rights / {rights_level}) % 10 in (5)",
+        "expired trial": f"toUInt32(rights / {rights_level}) % 10 in (4)",
+        "expired any": f"toUInt32(rights / {rights_level}) % 10 in (4, 5)",
+        "all": "1",
+    }
+    return rights_dict[rights]
+
+
+def _wrap_exp_users_query(query: str, client: str, segment_name: str) -> str:
+    return f"""
+        select
+            *,
+            {_clickhouse_string_literal(client)} as `client`,
+            {_clickhouse_string_literal(segment_name)} as `segment`
+        from (
+            {query}
+        )
+    """
+
+
+def _should_insert_exp_users_day(table_name: str, current_day: datetime.datetime, client: str, segment_name: str) -> bool:
+    current_day_str = current_day.strftime("%Y-%m-%d")
+    query = f"""
+        select
+            countIf(toDate(`exp_start_dt`, 'UTC') = toDate('{current_day_str}')) as `rows_for_day`,
+            max(toDate(`exp_start_dt`, 'UTC')) as `max_dt`
+        from {table_name}
+        where
+            `client` = {_clickhouse_string_literal(client)}
+        and
+            `segment` = {_clickhouse_string_literal(segment_name)}
+    """
+    df = execute_sql(query)
+    rows_for_day = int(df["rows_for_day"].iloc[0] or 0)
+    max_dt = df["max_dt"].iloc[0]
+
+    if rows_for_day == 0:
+        return True
+    if pd.isna(max_dt):
+        return True
+
+    return str(max_dt)[:10] == current_day_str
+
+
+def _add_months(source_date: datetime.date, months: int) -> datetime.date:
+    month = source_date.month - 1 + months
+    year = source_date.year + month // 12
+    month = month % 12 + 1
+    day = min(
+        source_date.day,
+        [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1],
+    )
+    return datetime.date(year, month, day)
+
+
+def _iter_half_year_blocks(date_start: datetime.date, date_end: datetime.date):
+    block_start = date_start
+    while block_start <= date_end:
+        next_block_start = _add_months(block_start, 6)
+        block_end = min(next_block_start - datetime.timedelta(days=1), date_end)
+        yield block_start, block_end
+        block_start = next_block_start
+
+
+def _get_table_max_subscribed_date(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> Optional[datetime.date]:
+    cfg = get_config(config)
+    is_exists = execute_sql(f"exists {table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        return None
+
+    df = execute_sql(f"select max(toDate(`subscribed_dt`)) as `max_dt` from {table_name}")
+    max_dt = df["max_dt"].iloc[0]
+    if pd.isna(max_dt):
+        return None
+    if isinstance(max_dt, datetime.datetime):
+        max_dt = max_dt.date()
+    elif not isinstance(max_dt, datetime.date):
+        max_dt = datetime.datetime.strptime(str(max_dt)[:10], "%Y-%m-%d").date()
+
+    if max_dt < cfg.subscriptions_start_date:
+        return None
+
+    return max_dt
+
+
+def _table_has_column(table_name: str, column_name: str) -> bool:
+    database, short_table_name = table_name.split(".", 1)
+    query = f"""
+        select count() as `columns_cnt`
+        from system.columns
+        where
+            `database` = '{database}'
+        and
+            `table` = '{short_table_name}'
+        and
+            `name` = '{column_name}'
+    """
+    df = execute_sql(query)
+    return int(df["columns_cnt"].iloc[0] or 0) > 0
+
+
+def _was_subscription_day_updated_recently(table_name: str, subscribed_date: datetime.date) -> bool:
+    if not _table_has_column(table_name, "updated_at"):
+        return False
+
+    query = f"""
+        select max(`updated_at`) as `last_updated_at`
+        from {table_name}
+        where toDate(`subscribed_dt`) = toDate('{subscribed_date}')
+    """
+    df = execute_sql(query)
+    last_updated_at = df["last_updated_at"].iloc[0]
+    if pd.isna(last_updated_at):
+        return False
+
+    if not isinstance(last_updated_at, datetime.datetime):
+        last_updated_at = datetime.datetime.strptime(str(last_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
+    if last_updated_at.tzinfo is None:
+        last_updated_at = last_updated_at.replace(tzinfo=datetime.timezone.utc)
+
+    return last_updated_at >= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+
+
+def _ensure_updated_at_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "updated_at"):
+        return
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `updated_at` DateTime default toDateTime(0)
+    """
+    execute_sql_modify(query)
+
+
+def _create_table_from_select(
+    table_name: str,
+    query_name: str,
+    params: dict,
+    partition: str,
+    sorting: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    create_query = create_table_sql(table_name, schema="", partition=partition, sorting=sorting, config=cfg)
+    select_query = get_query(query_name, params=params, config=cfg)
+    query = create_query + "\n as \n select * from (\n" + select_query + "\n) where 0"
+    logger.info("Creating table %s with query:\n%s", cfg.full_table(table_name), query)
+    execute_sql_modify(query)
+
+
+def _delete_subscriptions_block(table_name: str, block_start: datetime.date, block_end: datetime.date, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        delete where toDate(`subscribed_dt`) between toDate('{block_start}') and toDate('{block_end}')
+        settings mutations_sync = 1
+    """
+    logger.info("Deleting subscriptions block from %s for %s - %s", table_name, block_start, block_end)
+    execute_sql_modify(query)
+
+
+def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+
+    is_subscriptions_exists = execute_sql(f"exists {cfg.subscriptions_table}")
+    if int(is_subscriptions_exists.iloc[0].values[0]) == 0:
+        _create_table_from_select(
+            "subscriptions",
+            "subscriptions_store_by_sub_date",
+            {
+                "date_start": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
+                "date_end": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
+            },
+            "toYYYYMM(toDate(subscribed_dt))",
+            "subscribed_dt, subscription_id, product_code",
+            config=cfg,
+        )
+    else:
+        _ensure_updated_at_column(cfg.subscriptions_table, config=cfg)
+
+    is_transactions_exists = execute_sql(f"exists {cfg.subscription_transactions_table}")
+    if int(is_transactions_exists.iloc[0].values[0]) == 0:
+        _create_table_from_select(
+            "subscriptions_transactions",
+            "subscription_transactions_store_by_sub_date",
+            {
+                "date_start": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
+                "date_end": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
+                "subscriptions_table": cfg.subscriptions_table,
+            },
+            "toYYYYMM(toDate(subscribed_dt))",
+            "subscribed_dt, subscription_id, product_code",
+            config=cfg,
+        )
+    else:
+        _ensure_updated_at_column(cfg.subscription_transactions_table, config=cfg)
+
+
+def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    _ensure_subscription_source_tables(config=cfg)
+
+    subscriptions_max_dt = _get_table_max_subscribed_date(cfg.subscriptions_table, config=cfg)
+    transactions_max_dt = _get_table_max_subscribed_date(cfg.subscription_transactions_table, config=cfg)
+    dates = [dt for dt in [subscriptions_max_dt, transactions_max_dt] if dt is not None]
+    date_start = min(dates) if dates else cfg.subscriptions_start_date
+    date_end = datetime.datetime.now(datetime.timezone.utc).date()
+
+    if date_start > date_end:
+        return
+
+    if (
+        date_start == date_end
+        and _was_subscription_day_updated_recently(cfg.subscriptions_table, date_start)
+        and _was_subscription_day_updated_recently(cfg.subscription_transactions_table, date_start)
+    ):
+        logger.info("Skipping subscription source tables update for %s: updated less than 1 hour ago", date_start)
+        return
+
+    for block_start, block_end in _iter_half_year_blocks(date_start, date_end):
+        logger.info("Updating subscription source tables for %s - %s", block_start, block_end)
+
+        _delete_subscriptions_block(cfg.subscription_transactions_table, block_start, block_end, config=cfg)
+        _delete_subscriptions_block(cfg.subscriptions_table, block_start, block_end, config=cfg)
+
+        subscriptions_query = get_query(
+            "subscriptions_store_by_sub_date",
+            {
+                "date_start": block_start.strftime("%Y-%m-%d"),
+                "date_end": block_end.strftime("%Y-%m-%d"),
+            },
+            config=cfg,
+        )
+        execute_sql_modify(f"insert into {cfg.subscriptions_table}\n{subscriptions_query}")
+
+        transactions_query = get_query(
+            "subscription_transactions_store_by_sub_date",
+            {
+                "date_start": block_start.strftime("%Y-%m-%d"),
+                "date_end": block_end.strftime("%Y-%m-%d"),
+                "subscriptions_table": cfg.subscriptions_table,
+            },
+            config=cfg,
+        )
+        execute_sql_modify(f"insert into {cfg.subscription_transactions_table}\n{transactions_query}")
+
+
+def create_experiment_users_table(
+    exp_info: dict,
+    client: str,
+    segment_name: str,
+    segment: dict,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    exp_id = exp_info["id"]
+    exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
+    table_name = f"exp_users_{exp_id}"
+    full_table_name = cfg.full_table(table_name)
+
+    where_filter = segment.get("uwf", "1")
+    if exp_info["experiment_event_start"] == "App Experiment Start":
+        where_filter += f" and (event = 'App Experiment Start' and item_id = {exp_id})"
+    elif exp_info["experiment_event_start"] != "":
+        where_filter += f" and event = '{exp_info['experiment_event_start']}'"
+    having_filter = segment.get("uhf", "1")
+    pro_rights = generate_sql_rights_filter("pro", segment.get("pro_rights", "all").lower())
+    edu_rights = generate_sql_rights_filter("edu", segment.get("edu_rights", "all").lower())
+    sing_rights = generate_sql_rights_filter("edu", segment.get("sing_rights", "all").lower())
+    practice_rights = generate_sql_rights_filter("edu", segment.get("practice_rights", "all").lower())
+    book_rights = generate_sql_rights_filter("edu", segment.get("book_rights", "all").lower())
+    having_filter += f" and ({pro_rights} and {edu_rights} and {sing_rights} and {practice_rights} and {book_rights})"
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        query_part_1 = create_table_sql(
+            table_name,
+            schema="",
+            partition="toYYYYMM(toDate(exp_start_dt)), client, segment",
+            sorting="client, segment, exp_start_dt",
+            config=cfg,
+        )
+        seed_query_name = "exp_raw_data_web" if "UG_WEB" in exp_info["clients_list"] else "exp_raw_data_app"
+        seed_query = get_query(
+            seed_query_name,
+            params={
+                "exp_id": exp_id,
+                "where_sql": where_filter,
+                "having_sql": having_filter,
+                "date_filter": exp_start_dt.strftime("%Y-%m-%d"),
+                "client": client,
+            },
+            config=cfg,
+        )
+        query_part_2 = _wrap_exp_users_query(seed_query, client, segment_name)
+        query = query_part_1 + "\n as \n select * from (\n" + query_part_2 + "\n) where 0"
+        logger.info("Creating experiment users table with query:\n%s", query)
+        execute_sql_modify(query)
+
+    exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
+    if exp_info["date_end"] > exp_info["date_start"]:
+        exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
+    days_cnt = (exp_end_dt.date() - exp_start_dt.date()).days
+    for day in range(days_cnt + 1):
+        current_day = exp_start_dt + datetime.timedelta(days=day)
+        if not _should_insert_exp_users_day(full_table_name, current_day, client, segment_name):
+            logger.info(
+                "Skipping users insert for exp_id=%s, client=%s, segment=%s, date=%s",
+                exp_id,
+                client,
+                segment_name,
+                current_day.strftime("%Y-%m-%d"),
+            )
+            continue
+
+        query_part_1 = f"insert into {full_table_name}"
+        insert_query_name = "exp_raw_data_web_insert" if "UG_WEB" in exp_info["clients_list"] else "exp_raw_data_app_insert"
+        query_part_2 = get_query(
+            insert_query_name,
+            params={
+                "exp_id": exp_id,
+                "where_sql": where_filter,
+                "having_sql": having_filter,
+                "date_filter": current_day.strftime("%Y-%m-%d"),
+                "exp_users_table": full_table_name,
+                "client": client,
+                "client_sql": _clickhouse_string_literal(client),
+                "segment_sql": _clickhouse_string_literal(segment_name),
+            },
+            config=cfg,
+        )
+        query = query_part_1 + "\n" + _wrap_exp_users_query(query_part_2, client, segment_name)
+        logger.info("Inserting experiment users table with query:\n%s", query)
+        execute_sql_modify(query)
+
+    return full_table_name
+
+
+def create_experiments_subscription_table(
+    exp_info: dict,
+    client: str,
+    segment: dict,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    session_id = generate_random_id(32)
+    table_name = f"exp_subscription_{exp_info['id']}_{session_id}"
+    query_part_1 = create_table_sql(
+        table_name,
+        schema="",
+        partition="toYYYYMM(toDate(subscribed_dt))",
+        sorting="subscribed_dt",
+        config=cfg,
+    )
+    where_filter = segment.get("swf", "1")
+    having_filter = segment.get("shf", "1")
+    exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
+    exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
+    if exp_info["date_end"] > exp_info["date_start"]:
+        exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
+    query_part_2 = get_query(
+        "subscriptions_joined_by_sub_date",
+        params={
+            "date_start": exp_start_dt.strftime("%Y-%m-%d"),
+            "date_end": exp_end_dt.strftime("%Y-%m-%d"),
+            "where_sql": where_filter,
+            "having_sql": having_filter,
+            "subscriptions_table": cfg.subscriptions_table,
+            "transactions_table": cfg.subscription_transactions_table,
+        },
+        config=cfg,
+    )
+    query = query_part_1 + "\n as \n" + query_part_2
+    execute_sql_modify(query)
+
+    return cfg.full_table(table_name)
+
+
+def drop_table(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    query = f"""
+        drop table if exists {table_name} on cluster {cfg.cluster}
+        settings
+        distributed_ddl_task_timeout = 0,
+        distributed_ddl_output_mode = 'none'
+    """
+    execute_sql_modify(query)
+
+
+def get_monetization_metrics(
+    exp_info: dict,
+    exp_users_table: str,
+    subscription_table: str,
+    client: str,
+    segment_name: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    query = get_query(
+        "monetization_metrics",
+        params={
+            "exp_users_table": exp_users_table,
+            "subscription_table": subscription_table,
+            "client_sql": _clickhouse_string_literal(client),
+            "segment_sql": _clickhouse_string_literal(segment_name),
+        },
+        config=config,
+    )
+    logger.info("total query:\n%s", query)
+    return execute_sql(query)
+
+
+def create_results_table(table_name: str, df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    schema = pandas_to_clickhouse_types(df)
+    query = create_table_sql(
+        table_name,
+        schema=f"({schema})",
+        partition="toYYYYMM(toDate(dt)), exp_id, client, segment",
+        sorting="dt",
+        config=cfg,
+    )
+    logger.info("Creating experiment results table with query:\n%s", query)
+    execute_sql_modify(query)
+    insert_df_by_chunks(cfg.full_table(table_name), df)
+
+
+def create_exp_results_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    create_results_table("ug_exp_results", df, config=config)
+
+
+def create_exp_stats_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    create_results_table("ug_exp_stats", df, config=config)
+
+
+def update_exp_results_table(df: pd.DataFrame, table: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    insert_df_by_chunks(cfg.full_table(table), df)
+
+
+def clear_exp_temp_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    query = get_query(
+        "get_sloperator_temp_tables",
+        params={
+            "database": cfg.database,
+            "table_prefix": cfg.table_prefix,
+        },
+        config=cfg,
+    )
+    df = execute_sql(query)
+    tables = df["table_name"].tolist()
+    for table in tables:
+        drop_table(f"{cfg.database}.{table}", config=cfg)
