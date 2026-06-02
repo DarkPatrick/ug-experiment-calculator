@@ -7,8 +7,15 @@ from clickhouse_worker import execute_sql
 import pandas as pd
 
 from .config import ExperimentCalculatorConfig
-from .metrics import calc_cumulative_aggregates, calc_metrics_stats_by_variation_pairs
+from .metrics import (
+    calc_cumulative_aggregates,
+    calc_cumulative_funnel_aggregates,
+    calc_funnel_stats_by_variation_pairs,
+    calc_metrics_stats_by_variation_pairs,
+)
 from .repository import (
+    create_exp_funnel_results_table,
+    create_exp_funnel_stats_table,
     create_exp_results_table,
     create_exp_stats_table,
     create_experiment_users_table,
@@ -17,12 +24,40 @@ from .repository import (
     drop_table,
     get_experiment,
     get_monetization_metrics,
+    get_tour_subscription_funnels,
     update_exp_results_table,
     update_subscription_source_tables,
 )
 
 
 logger = logging.getLogger(__name__)
+
+
+def _replace_exp_output_table(
+    df: pd.DataFrame,
+    *,
+    exp_id: int,
+    client: str,
+    segment_name: str,
+    logical_table_name: str,
+    full_table_name: str,
+    create_table_func,
+    config: ExperimentCalculatorConfig,
+) -> None:
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        if df.empty:
+            logger.info("Skipping %s creation: dataframe is empty", full_table_name)
+            return
+        create_table_func(df, config=config)
+        return
+
+    drop_exp_partitions(exp_id, client_name=client, segment=segment_name, table_name=logical_table_name, config=config)
+    if df.empty:
+        logger.info("Skipping %s insert: dataframe is empty", full_table_name)
+        return
+
+    update_exp_results_table(df, table=logical_table_name, config=config)
 
 
 def calculate_exp_info(
@@ -63,6 +98,46 @@ def calculate_exp_info(
             logger.info("Loading monetization metrics")
             df = get_monetization_metrics(exp_info, exp_users_table, subscription_table, client, segment_name, config=cfg)
             df_tot[(client, segment_name)] = df
+
+            logger.info("Loading subscription funnels")
+            funnel_df = get_tour_subscription_funnels(exp_users_table, subscription_table, client, segment_name, config=cfg)
+
+            logger.info("Calculating cumulative funnel aggregates")
+            funnel_cum_df = calc_cumulative_funnel_aggregates(funnel_df)
+
+            logger.info("Calculating cumulative funnel statistics")
+            funnel_stats_df = calc_funnel_stats_by_variation_pairs(
+                cumulative_df=funnel_cum_df,
+                control_variation=1,
+            )
+
+            funnel_cum_df["exp_id"] = exp_id
+            funnel_cum_df["client"] = client
+            funnel_cum_df["segment"] = segment_name
+            funnel_stats_df["exp_id"] = exp_id
+            funnel_stats_df["client"] = client
+            funnel_stats_df["segment"] = segment_name
+
+            _replace_exp_output_table(
+                funnel_cum_df,
+                exp_id=exp_id,
+                client=client,
+                segment_name=segment_name,
+                logical_table_name="ug_exp_funnel_stats",
+                full_table_name=cfg.exp_funnel_stats_table,
+                create_table_func=create_exp_funnel_stats_table,
+                config=cfg,
+            )
+            _replace_exp_output_table(
+                funnel_stats_df,
+                exp_id=exp_id,
+                client=client,
+                segment_name=segment_name,
+                logical_table_name="ug_exp_funnel_results",
+                full_table_name=cfg.exp_funnel_results_table,
+                create_table_func=create_exp_funnel_results_table,
+                config=cfg,
+            )
 
             logger.info("Deleting temporary subscription table")
             drop_table(subscription_table, config=cfg)

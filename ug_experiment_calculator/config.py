@@ -86,3 +86,11 @@ class ExperimentCalculatorConfig:
     @property
     def exp_stats_table(self) -> str:
         return self.full_table("ug_exp_stats")
+
+    @property
+    def exp_funnel_stats_table(self) -> str:
+        return self.full_table("ug_exp_funnel_stats")
+
+    @property
+    def exp_funnel_results_table(self) -> str:
+        return self.full_table("ug_exp_funnel_results")

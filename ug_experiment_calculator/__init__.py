@@ -2,6 +2,8 @@ from .calculator import calculate_exp_info
 from .config import ExperimentCalculatorConfig
 from .metrics import (
     calc_cumulative_aggregates,
+    calc_cumulative_funnel_aggregates,
+    calc_funnel_stats_by_variation_pairs,
     calc_metrics_stats_by_variation_pairs,
     calc_stats,
     fill_missing_variations_by_date,
@@ -10,6 +12,8 @@ from .metrics import (
 )
 from .repository import (
     clear_exp_temp_tables,
+    create_exp_funnel_results_table,
+    create_exp_funnel_stats_table,
     create_exp_results_table,
     create_exp_stats_table,
     create_experiment_users_table,
@@ -19,6 +23,7 @@ from .repository import (
     get_experiment,
     get_exps_list,
     get_monetization_metrics,
+    get_tour_subscription_funnels,
     get_ugg_exps_list,
     get_ugm_exps_list,
     get_ugp_exps_list,
@@ -29,10 +34,14 @@ from .repository import (
 __all__ = [
     "ExperimentCalculatorConfig",
     "calc_cumulative_aggregates",
+    "calc_cumulative_funnel_aggregates",
+    "calc_funnel_stats_by_variation_pairs",
     "calc_metrics_stats_by_variation_pairs",
     "calc_stats",
     "calculate_exp_info",
     "clear_exp_temp_tables",
+    "create_exp_funnel_results_table",
+    "create_exp_funnel_stats_table",
     "create_exp_results_table",
     "create_exp_stats_table",
     "create_experiment_users_table",
@@ -43,6 +52,7 @@ __all__ = [
     "get_experiment",
     "get_exps_list",
     "get_monetization_metrics",
+    "get_tour_subscription_funnels",
     "get_ugg_exps_list",
     "get_ugm_exps_list",
     "get_ugp_exps_list",

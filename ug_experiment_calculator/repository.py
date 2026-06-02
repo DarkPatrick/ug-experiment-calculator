@@ -131,6 +131,14 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
     string_columns = [
         "dt",
         "metric",
+        "funnel_key",
+        "funnel_name",
+        "transition_key",
+        "transition_name",
+        "from_step_key",
+        "from_step_name",
+        "to_step_key",
+        "to_step_name",
         "variation_pair",
         "numerator",
         "denominator",
@@ -146,6 +154,14 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "test_variation",
         "exp_id",
         "variation",
+        "from_step_order",
+        "to_step_order",
+        "control_denominator",
+        "control_numerator",
+        "test_denominator",
+        "test_numerator",
+        "denominator_users",
+        "numerator_users",
         "members",
         "install_cnt",
         "subscriber_cnt",
@@ -196,6 +212,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "arppu_var",
         "subscriptions_per_user_var",
         "value",
+        "conversion",
     ]
 
     for col in string_columns:
@@ -742,6 +759,28 @@ def get_monetization_metrics(
     return execute_sql(query)
 
 
+def get_tour_subscription_funnels(
+    exp_users_table: str,
+    subscription_table: str,
+    client: str,
+    segment_name: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    query = get_query(
+        "tour_subscription_funnels",
+        params={
+            "exp_users_table": exp_users_table,
+            "subscription_table": subscription_table,
+            "client_sql": _clickhouse_string_literal(client),
+            "segment_sql": _clickhouse_string_literal(segment_name),
+        },
+        config=config,
+    )
+    logger.info("tour subscription funnels query:\n%s", query)
+    return execute_sql(query)
+
+
 def create_results_table(table_name: str, df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     cfg = get_config(config)
     schema = pandas_to_clickhouse_types(df)
@@ -763,6 +802,14 @@ def create_exp_results_table(df: pd.DataFrame, *, config: Optional[ExperimentCal
 
 def create_exp_stats_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     create_results_table("ug_exp_stats", df, config=config)
+
+
+def create_exp_funnel_stats_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    create_results_table("ug_exp_funnel_stats", df, config=config)
+
+
+def create_exp_funnel_results_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    create_results_table("ug_exp_funnel_results", df, config=config)
 
 
 def update_exp_results_table(df: pd.DataFrame, table: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:

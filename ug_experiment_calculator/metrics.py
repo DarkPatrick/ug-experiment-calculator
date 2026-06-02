@@ -116,6 +116,63 @@ def calc_cumulative_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+FUNNEL_ID_COLUMNS = [
+    "funnel_key",
+    "funnel_name",
+    "transition_key",
+    "transition_name",
+    "from_step_key",
+    "from_step_name",
+    "from_step_order",
+    "to_step_key",
+    "to_step_name",
+    "to_step_order",
+]
+
+
+def calc_cumulative_funnel_aggregates(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    if df.empty:
+        df["conversion"] = pd.Series(dtype="float64")
+        return df
+
+    df["dt"] = pd.to_datetime(df["dt"])
+    df["denominator_users"] = pd.to_numeric(df["denominator_users"], errors="coerce").fillna(0)
+    df["numerator_users"] = pd.to_numeric(df["numerator_users"], errors="coerce").fillna(0)
+
+    all_dates = pd.date_range(df["dt"].min(), df["dt"].max(), freq="D")
+    all_variations = df["variation"].dropna().unique()
+    transitions = df[FUNNEL_ID_COLUMNS].drop_duplicates().reset_index(drop=True)
+    transitions = transitions.reset_index(names="transition_index")
+
+    full_index = pd.MultiIndex.from_product(
+        [all_dates, all_variations, transitions["transition_index"]],
+        names=["dt", "variation", "transition_index"],
+    ).to_frame(index=False)
+
+    full_df = full_index.merge(transitions, on="transition_index", how="left").drop(columns=["transition_index"])
+    full_df = full_df.merge(
+        df,
+        on=["dt", "variation", *FUNNEL_ID_COLUMNS],
+        how="left",
+    )
+    full_df[["denominator_users", "numerator_users"]] = full_df[["denominator_users", "numerator_users"]].fillna(0)
+
+    sort_columns = ["variation", "funnel_key", "from_step_order", "to_step_order", "dt"]
+    full_df = full_df.sort_values(sort_columns).reset_index(drop=True)
+    group_columns = ["variation", *FUNNEL_ID_COLUMNS]
+    full_df[["denominator_users", "numerator_users"]] = full_df.groupby(group_columns, dropna=False)[
+        ["denominator_users", "numerator_users"]
+    ].cumsum()
+    full_df[["denominator_users", "numerator_users"]] = full_df[
+        ["denominator_users", "numerator_users"]
+    ].astype("int64")
+    full_df["conversion"] = full_df["numerator_users"] / full_df["denominator_users"].replace({0: np.nan})
+    full_df["dt"] = full_df["dt"].dt.strftime("%Y-%m-%d")
+
+    return full_df
+
+
 def normalize_metric_config(metric_items: list[dict]) -> dict:
     config = {}
     for item in metric_items:
@@ -289,6 +346,93 @@ def calc_metrics_stats_by_variation_pairs(
                     "distribution": distribution,
                     "percentage": is_percentage,
                 })
+
+    result = pd.DataFrame(result_rows)
+    if not result.empty:
+        result["dt"] = result["dt"].dt.strftime("%Y-%m-%d")
+
+    return result
+
+
+def calc_funnel_stats_by_variation_pairs(
+    cumulative_df: pd.DataFrame,
+    control_variation: int = 1,
+) -> pd.DataFrame:
+    df = cumulative_df.copy()
+    if df.empty:
+        return pd.DataFrame()
+
+    df["dt"] = pd.to_datetime(df["dt"])
+    all_variations = sorted(df["variation"].unique())
+    test_variations = [variation for variation in all_variations if variation != control_variation]
+    result_rows = []
+
+    for group_key, date_df in df.groupby(["dt", *FUNNEL_ID_COLUMNS], dropna=False):
+        current_dt = group_key[0]
+        funnel_values = dict(zip(FUNNEL_ID_COLUMNS, group_key[1:]))
+        control_rows = date_df[date_df["variation"] == control_variation]
+
+        if control_rows.empty:
+            continue
+
+        control_row = control_rows.iloc[0]
+        denominator_0 = control_row["denominator_users"]
+        numerator_0 = control_row["numerator_users"]
+        mean_0 = safe_divide(numerator_0, denominator_0)
+        len_0 = denominator_0
+
+        if pd.isna(mean_0) or pd.isna(len_0) or len_0 <= 0:
+            continue
+
+        var_0 = mean_0 * (1 - mean_0)
+
+        for test_variation in test_variations:
+            test_rows = date_df[date_df["variation"] == test_variation]
+            if test_rows.empty:
+                continue
+
+            test_row = test_rows.iloc[0]
+            denominator_1 = test_row["denominator_users"]
+            numerator_1 = test_row["numerator_users"]
+            mean_1 = safe_divide(numerator_1, denominator_1)
+            len_1 = denominator_1
+
+            if pd.isna(mean_1) or pd.isna(len_1) or len_1 <= 0:
+                continue
+
+            var_1 = mean_1 * (1 - mean_1)
+            stats = calc_stats(
+                mean_0=mean_0,
+                mean_1=mean_1,
+                var_0=var_0,
+                var_1=var_1,
+                len_0=len_0,
+                len_1=len_1,
+            )
+
+            mean_diff = mean_1 - mean_0
+            ci = stats["ci"]
+
+            result_rows.append({
+                "dt": current_dt,
+                **funnel_values,
+                "variation_pair": f"{control_variation} vs {test_variation}",
+                "control_variation": control_variation,
+                "test_variation": test_variation,
+                "control_denominator": denominator_0,
+                "control_numerator": numerator_0,
+                "test_denominator": denominator_1,
+                "test_numerator": numerator_1,
+                "mean_0": mean_0 * 100,
+                "mean_1": mean_1 * 100,
+                "mean_diff": mean_diff * 100,
+                "lift": mean_diff / mean_0 * 100 if mean_0 != 0 else 0,
+                "ci_low": ci[0][0] * 100,
+                "ci_high": ci[0][1] * 100,
+                "pvalue": stats["pvalue"],
+                "distribution": "bernoulli",
+                "percentage": True,
+            })
 
     result = pd.DataFrame(result_rows)
     if not result.empty:
