@@ -75,6 +75,8 @@ with
                     `client` = {client_sql}
                 and
                     `segment` = {segment_sql}
+                and
+                    `segment_hash` = {segment_hash_sql}
             ) as `eut`
             left join (
                 select distinct *

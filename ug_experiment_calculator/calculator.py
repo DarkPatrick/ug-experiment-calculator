@@ -24,6 +24,7 @@ from .repository import (
     drop_table,
     get_experiment,
     get_monetization_metrics,
+    get_segment_hash,
     get_tour_subscription_funnels,
     update_exp_results_table,
     update_subscription_source_tables,
@@ -85,6 +86,7 @@ def calculate_exp_info(
 
     for client in exp_info["clients_list"]:
         for segment_name, segment in exp_info["segments"].items():
+            segment_hash = get_segment_hash(segment)
             logger.info("Calculating experiment info for exp_id=%s, client=%s, segment=%s", exp_id, client, segment_name)
             logger.info("Experiment info:\n%s", exp_info)
 
@@ -96,11 +98,26 @@ def calculate_exp_info(
             logger.info("exp_users_table=%s, subscription_table=%s", exp_users_table, subscription_table)
 
             logger.info("Loading monetization metrics")
-            df = get_monetization_metrics(exp_info, exp_users_table, subscription_table, client, segment_name, config=cfg)
+            df = get_monetization_metrics(
+                exp_info,
+                exp_users_table,
+                subscription_table,
+                client,
+                segment_name,
+                segment_hash,
+                config=cfg,
+            )
             df_tot[(client, segment_name)] = df
 
             logger.info("Loading subscription funnels")
-            funnel_df = get_tour_subscription_funnels(exp_users_table, subscription_table, client, segment_name, config=cfg)
+            funnel_df = get_tour_subscription_funnels(
+                exp_users_table,
+                subscription_table,
+                client,
+                segment_name,
+                segment_hash,
+                config=cfg,
+            )
 
             logger.info("Calculating cumulative funnel aggregates")
             funnel_cum_df = calc_cumulative_funnel_aggregates(funnel_df)

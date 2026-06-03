@@ -38,6 +38,8 @@ and
     `eut`.`client` = {client_sql}
 and
     `eut`.`segment` = {segment_sql}
+and
+    `eut`.`segment_hash` = {segment_hash_sql}
 where
     `urew`.`date` = `date_filter`
 and

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import datetime
+import hashlib
+import json
 import logging
 import math
 import random
@@ -147,6 +149,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "percentage",
         "client",
         "segment",
+        "segment_hash",
     ]
 
     int_columns = [
@@ -349,19 +352,31 @@ def generate_sql_rights_filter(rights_type: str, rights: str) -> str:
     return rights_dict[rights]
 
 
-def _wrap_exp_users_query(query: str, client: str, segment_name: str) -> str:
+def get_segment_hash(segment: dict) -> str:
+    segment_json = json.dumps(segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
+
+
+def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_hash: str) -> str:
     return f"""
         select
             *,
             {_clickhouse_string_literal(client)} as `client`,
-            {_clickhouse_string_literal(segment_name)} as `segment`
+            {_clickhouse_string_literal(segment_name)} as `segment`,
+            {_clickhouse_string_literal(segment_hash)} as `segment_hash`
         from (
             {query}
         )
     """
 
 
-def _should_insert_exp_users_day(table_name: str, current_day: datetime.datetime, client: str, segment_name: str) -> bool:
+def _should_insert_exp_users_day(
+    table_name: str,
+    current_day: datetime.datetime,
+    client: str,
+    segment_name: str,
+    segment_hash: str,
+) -> bool:
     current_day_str = current_day.strftime("%Y-%m-%d")
     query = f"""
         select
@@ -372,6 +387,8 @@ def _should_insert_exp_users_day(table_name: str, current_day: datetime.datetime
             `client` = {_clickhouse_string_literal(client)}
         and
             `segment` = {_clickhouse_string_literal(segment_name)}
+        and
+            `segment_hash` = {_clickhouse_string_literal(segment_hash)}
     """
     df = execute_sql(query)
     rows_for_day = int(df["rows_for_day"].iloc[0] or 0)
@@ -440,6 +457,74 @@ def _table_has_column(table_name: str, column_name: str) -> bool:
     """
     df = execute_sql(query)
     return int(df["columns_cnt"].iloc[0] or 0) > 0
+
+
+def _ensure_segment_hash_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "segment_hash"):
+        return
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `segment_hash` String default ''
+    """
+    execute_sql_modify(query)
+
+
+def _delete_exp_users_segment(
+    table_name: str,
+    client: str,
+    segment_name: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        delete where
+            `client` = {_clickhouse_string_literal(client)}
+        and
+            `segment` = {_clickhouse_string_literal(segment_name)}
+        settings mutations_sync = 1
+    """
+    logger.info("Deleting cached users from %s for client=%s, segment=%s", table_name, client, segment_name)
+    execute_sql_modify(query)
+
+
+def _ensure_exp_users_segment_hash(
+    table_name: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    _ensure_segment_hash_column(table_name, config=config)
+    query = f"""
+        select
+            count() as `rows_cnt`,
+            countIf(`segment_hash` != {_clickhouse_string_literal(segment_hash)}) as `mismatched_rows_cnt`
+        from {table_name}
+        where
+            `client` = {_clickhouse_string_literal(client)}
+        and
+            `segment` = {_clickhouse_string_literal(segment_name)}
+    """
+    df = execute_sql(query)
+    rows_cnt = int(df["rows_cnt"].iloc[0] or 0)
+    mismatched_rows_cnt = int(df["mismatched_rows_cnt"].iloc[0] or 0)
+    if rows_cnt == 0 or mismatched_rows_cnt == 0:
+        return
+
+    logger.info(
+        "Segment hash changed for client=%s, segment=%s: deleting %s cached rows",
+        client,
+        segment_name,
+        rows_cnt,
+    )
+    _delete_exp_users_segment(table_name, client, segment_name, config=config)
 
 
 def _was_subscription_day_updated_recently(table_name: str, subscribed_date: datetime.date) -> bool:
@@ -605,6 +690,7 @@ def create_experiment_users_table(
     exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
     table_name = f"exp_users_{exp_id}"
     full_table_name = cfg.full_table(table_name)
+    segment_hash = get_segment_hash(segment)
 
     where_filter = segment.get("uwf", "1")
     if exp_info["experiment_event_start"] == "App Experiment Start":
@@ -625,7 +711,7 @@ def create_experiment_users_table(
             table_name,
             schema="",
             partition="toYYYYMM(toDate(exp_start_dt)), client, segment",
-            sorting="client, segment, exp_start_dt",
+            sorting="client, segment, segment_hash, exp_start_dt",
             config=cfg,
         )
         seed_query_name = "exp_raw_data_web" if "UG_WEB" in exp_info["clients_list"] else "exp_raw_data_app"
@@ -640,10 +726,12 @@ def create_experiment_users_table(
             },
             config=cfg,
         )
-        query_part_2 = _wrap_exp_users_query(seed_query, client, segment_name)
+        query_part_2 = _wrap_exp_users_query(seed_query, client, segment_name, segment_hash)
         query = query_part_1 + "\n as \n select * from (\n" + query_part_2 + "\n) where 0"
         logger.info("Creating experiment users table with query:\n%s", query)
         execute_sql_modify(query)
+
+    _ensure_exp_users_segment_hash(full_table_name, client, segment_name, segment_hash, config=cfg)
 
     exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
     if exp_info["date_end"] > exp_info["date_start"]:
@@ -651,7 +739,7 @@ def create_experiment_users_table(
     days_cnt = (exp_end_dt.date() - exp_start_dt.date()).days
     for day in range(days_cnt + 1):
         current_day = exp_start_dt + datetime.timedelta(days=day)
-        if not _should_insert_exp_users_day(full_table_name, current_day, client, segment_name):
+        if not _should_insert_exp_users_day(full_table_name, current_day, client, segment_name, segment_hash):
             logger.info(
                 "Skipping users insert for exp_id=%s, client=%s, segment=%s, date=%s",
                 exp_id,
@@ -674,10 +762,11 @@ def create_experiment_users_table(
                 "client": client,
                 "client_sql": _clickhouse_string_literal(client),
                 "segment_sql": _clickhouse_string_literal(segment_name),
+                "segment_hash_sql": _clickhouse_string_literal(segment_hash),
             },
             config=cfg,
         )
-        query = query_part_1 + "\n" + _wrap_exp_users_query(query_part_2, client, segment_name)
+        query = query_part_1 + "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
         logger.info("Inserting experiment users table with query:\n%s", query)
         execute_sql_modify(query)
 
@@ -742,6 +831,7 @@ def get_monetization_metrics(
     subscription_table: str,
     client: str,
     segment_name: str,
+    segment_hash: str,
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
@@ -752,6 +842,7 @@ def get_monetization_metrics(
             "subscription_table": subscription_table,
             "client_sql": _clickhouse_string_literal(client),
             "segment_sql": _clickhouse_string_literal(segment_name),
+            "segment_hash_sql": _clickhouse_string_literal(segment_hash),
         },
         config=config,
     )
@@ -764,6 +855,7 @@ def get_tour_subscription_funnels(
     subscription_table: str,
     client: str,
     segment_name: str,
+    segment_hash: str,
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
@@ -774,6 +866,7 @@ def get_tour_subscription_funnels(
             "subscription_table": subscription_table,
             "client_sql": _clickhouse_string_literal(client),
             "segment_sql": _clickhouse_string_literal(segment_name),
+            "segment_hash_sql": _clickhouse_string_literal(segment_hash),
         },
         config=config,
     )
