@@ -68,7 +68,7 @@ def build_metric_confluence_chart_code(
     significance_level: float = 0.05,
     max_x_ticks: int = 2,
     title_placement: Literal["subtitle", "title", "none"] = "none",
-    image_format: str = "svg",
+    image_format: str = "png",
 ) -> str:
     chart_data = _prepare_chart_data(
         rows,
@@ -115,7 +115,7 @@ def get_metric_confluence_chart_code(
     significance_level: float = 0.05,
     max_x_ticks: int = 2,
     title_placement: Literal["subtitle", "title", "none"] = "none",
-    image_format: str = "svg",
+    image_format: str = "png",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)

@@ -330,7 +330,7 @@ chart_code = get_metric_confluence_chart_code(
 - легенда включена;
 - добавляется красная серия `p = 0.05` как уровень значимости.
 
-Для компактного графика `max_x_ticks` по умолчанию равен `2`, поэтому Confluence рисует очень мало подписей дат на оси X. `image_format` по умолчанию `svg`, чтобы маленький график выглядел менее мыльным. Чтобы вернуть заголовок или PNG:
+Для компактного графика `max_x_ticks` по умолчанию равен `2`, поэтому Confluence рисует очень мало подписей дат на оси X. `image_format` по умолчанию `png`, потому что нативный Chart macro поддерживает только `png` и `jpg`. Чтобы вернуть заголовок или выбрать JPEG:
 
 ```python
 chart_code = get_metric_confluence_chart_code(
@@ -340,7 +340,7 @@ chart_code = get_metric_confluence_chart_code(
     segment="Total",
     max_x_ticks=3,
     title_placement="subtitle",
-    image_format="png",
+    image_format="jpg",
 )
 ```
 
