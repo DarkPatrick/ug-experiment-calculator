@@ -30,6 +30,14 @@ from .metrics import (
     normalize_funnel_config,
     safe_divide,
 )
+from .value_formatting import (
+    format_diff_percent,
+    format_metric_number,
+    format_metric_value,
+    format_plain_number,
+    format_pvalue,
+    number_or_none,
+)
 from .repository import (
     clear_exp_temp_tables,
     create_exp_funnel_results_table,
@@ -78,6 +86,11 @@ __all__ = [
     "ensure_table_columns",
     "fill_missing_variations_by_date",
     "funnel_enabled_for_client",
+    "format_diff_percent",
+    "format_metric_number",
+    "format_metric_value",
+    "format_plain_number",
+    "format_pvalue",
     "get_experiment",
     "get_experiment_confluence_table_code",
     "get_experiment_confluence_table_data",
@@ -97,6 +110,7 @@ __all__ = [
     "metric_columns_for_client",
     "normalize_funnel_config",
     "normalize_metric_config",
+    "number_or_none",
     "safe_divide",
     "update_exp_results_table",
     "update_subscription_source_tables",

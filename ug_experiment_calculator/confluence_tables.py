@@ -7,12 +7,17 @@ from pathlib import Path
 import uuid
 from typing import Any, Optional
 
-import numpy as np
 import pandas as pd
 
 from .config import ExperimentCalculatorConfig
 from .confluence_charts import build_metric_confluence_chart_code
 from .metrics import load_metrics_config, normalize_metric_config
+from .value_formatting import (
+    format_diff_percent,
+    format_metric_value,
+    format_pvalue,
+    number_or_none,
+)
 
 
 HEADER_COLOR = "#eae6ff"
@@ -39,6 +44,8 @@ class _MetricTableConfig:
     name: str
     table_position: int
     positive: bool
+    prefix: str
+    suffix: str
     source_index: int
 
 
@@ -182,7 +189,7 @@ def _control_row(df: pd.DataFrame, metric_configs: list[_MetricTableConfig]) -> 
     cells = [_row_header_cell("Control")]
     for metric_config in metric_configs:
         metric_rows = df[df["metric"] == metric_config.name]
-        cells.append(_cell(_format_number(_first_number(metric_rows, "mean_0"))))
+        cells.append(_cell(_format_metric_table_value(_first_number(metric_rows, "mean_0"), metric_config)))
     return _row(cells)
 
 
@@ -194,7 +201,7 @@ def _test_variation_row(
     cells = [_row_header_cell(f"Variation {_format_variation(test_variation)}")]
     for metric_config in metric_configs:
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
-        cells.append(_cell(_format_number(_row_number(row, "mean_1"))))
+        cells.append(_cell(_format_metric_table_value(_row_number(row, "mean_1"), metric_config)))
     return _row(cells)
 
 
@@ -206,7 +213,7 @@ def _lift_row(
     cells = [_row_header_cell("diff, %")]
     for metric_config in metric_configs:
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
-        cells.append(_cell(_format_number(_row_number(row, "lift"))))
+        cells.append(_cell(format_diff_percent(_row_number(row, "lift"))))
     return _row(cells)
 
 
@@ -220,7 +227,7 @@ def _pvalue_row(
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
         pvalue = _row_number(row, "pvalue")
         lift = _row_number(row, "lift")
-        cells.append(_cell(_format_number(pvalue), background=_pvalue_background(pvalue, lift, metric_config.positive)))
+        cells.append(_cell(format_pvalue(pvalue), background=_pvalue_background(pvalue, lift, metric_config.positive)))
     return _row(cells)
 
 
@@ -250,6 +257,8 @@ def _load_metric_table_configs(metrics_yaml_path: str | Path) -> list[_MetricTab
             name=metric_name,
             table_position=table_position,
             positive=bool(int(metric_config.get("positive", 1))),
+            prefix=str(metric_config.get("prefix") or ""),
+            suffix=str(metric_config.get("suffix") or ""),
             source_index=metric_index,
         ))
 
@@ -339,21 +348,11 @@ def _row_number(row: pd.Series | None, column: str) -> float | None:
 
 
 def _number_or_none(value: Any) -> float | None:
-    if value is None:
-        return None
-    if pd.isna(value):
-        return None
-    number_value = float(value)
-    if not np.isfinite(number_value):
-        return None
-    return number_value
+    return number_or_none(value)
 
 
-def _format_number(value: Any) -> str:
-    number_value = _number_or_none(value)
-    if number_value is None:
-        return ""
-    return f"{number_value:.4g}"
+def _format_metric_table_value(value: Any, metric_config: _MetricTableConfig) -> str:
+    return format_metric_value(value, prefix=metric_config.prefix, suffix=metric_config.suffix)
 
 
 def _format_variation(value: Any) -> str:

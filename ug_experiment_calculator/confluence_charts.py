@@ -10,6 +10,7 @@ import pandas as pd
 
 from .config import ExperimentCalculatorConfig
 from .echarts import ECHARTS_COLOR_RGB_VALUES
+from .value_formatting import format_plain_number
 
 
 CONFLUENCE_DATE_FORMAT = "yyyy-MM-dd"
@@ -361,10 +362,7 @@ def _number_or_none(value: Any) -> float | None:
 
 
 def _format_cell_value(value: Any) -> str:
-    number_value = _number_or_none(value)
-    if number_value is None:
-        return "0"
-    return f"{number_value:.6g}"
+    return format_plain_number(value, default="0")
 
 
 def _escape_wiki_cell(value: str) -> str:
