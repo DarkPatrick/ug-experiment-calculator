@@ -1,5 +1,10 @@
 from .calculator import calculate_exp_info
 from .config import ExperimentCalculatorConfig
+from .confluence_charts import (
+    build_metric_confluence_chart_code,
+    get_metric_confluence_chart_code,
+    get_metric_confluence_chart_data,
+)
 from .echarts import (
     build_metric_echarts_code,
     build_metric_echarts_options,
@@ -46,6 +51,7 @@ from .repository import (
 
 __all__ = [
     "ExperimentCalculatorConfig",
+    "build_metric_confluence_chart_code",
     "build_metric_echarts_code",
     "build_metric_echarts_options",
     "calc_cumulative_aggregates",
@@ -70,6 +76,8 @@ __all__ = [
     "get_exps_list",
     "get_funnel_metrics",
     "get_monetization_metrics",
+    "get_metric_confluence_chart_code",
+    "get_metric_confluence_chart_data",
     "get_metric_echarts_code",
     "get_metric_echarts_data",
     "get_segment_hash",
