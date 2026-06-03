@@ -5,6 +5,11 @@ from .confluence_charts import (
     get_metric_confluence_chart_code,
     get_metric_confluence_chart_data,
 )
+from .confluence_tables import (
+    build_experiment_confluence_table_code,
+    get_experiment_confluence_table_code,
+    get_experiment_confluence_table_data,
+)
 from .echarts import (
     build_metric_echarts_code,
     build_metric_echarts_options,
@@ -51,6 +56,7 @@ from .repository import (
 
 __all__ = [
     "ExperimentCalculatorConfig",
+    "build_experiment_confluence_table_code",
     "build_metric_confluence_chart_code",
     "build_metric_echarts_code",
     "build_metric_echarts_options",
@@ -73,6 +79,8 @@ __all__ = [
     "fill_missing_variations_by_date",
     "funnel_enabled_for_client",
     "get_experiment",
+    "get_experiment_confluence_table_code",
+    "get_experiment_confluence_table_data",
     "get_exps_list",
     "get_funnel_metrics",
     "get_monetization_metrics",

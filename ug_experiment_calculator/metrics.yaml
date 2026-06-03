@@ -5,6 +5,8 @@ members -> subscribers, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "conversion rate from members to subscribers"
+  - table_position: 5
+  - positive: 1
     
 trials share, %:
   - numerator: access_trial_cnt
@@ -13,6 +15,8 @@ trials share, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "share of trials among subscriptions"
+  - table_position: 8
+  - positive: 1
 
 members -> buyers, %:
   - numerator: buyer_cnt
@@ -21,6 +25,8 @@ members -> buyers, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "conversion rate from members to buyers"
+  - table_position: 6
+  - positive: 1
 
 trial -> charge, %:
   - numerator: charged_trial_cnt
@@ -29,6 +35,8 @@ trial -> charge, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "conversion rate from trial to charge"
+  - table_position: 9
+  - positive: 1
 
 trial -> any charge, %:
   - numerator: any_charged_trial_cnt
@@ -37,6 +45,8 @@ trial -> any charge, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "conversion rate from trial to charge"
+  - table_position: 10
+  - positive: 1
 
 active trial -> charge, %:
   - numerator: active_charged_trial_cnt
@@ -45,6 +55,8 @@ active trial -> charge, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "conversion rate from active trial to charge"
+  - table_position: 0
+  - positive: 1
 
 pending trials share, %:
   - numerator: pending_trial_cnt
@@ -53,6 +65,8 @@ pending trials share, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "share of pending trials due payment date"
+  - table_position: 0
+  - positive: 0
 
 churn 14d, %:
   - numerator: cancel_14d_cnt
@@ -61,6 +75,8 @@ churn 14d, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "share of charges who churned within 14 days since payment date"
+  - table_position: 11
+  - positive: 0
 
 refund 14d, %:
   - numerator: refund_14d_cnt
@@ -69,6 +85,8 @@ refund 14d, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "share of charges who got refund within 14 days since payment date"
+  - table_position: 12
+  - positive: 0
 
 pending 14d charges share, %:
   - numerator: pending_14d_charge_cnt
@@ -77,6 +95,8 @@ pending 14d charges share, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "share of pending trials due payment date"
+  - table_position: 0
+  - positive: 0
 
 arppu, $:
   - numerator: revenue
@@ -85,6 +105,8 @@ arppu, $:
   - variance: arppu_var
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "average revenue per paying user"
+  - table_position: 3
+  - positive: 1
 
 arpu, $:
   - numerator: revenue
@@ -93,6 +115,8 @@ arpu, $:
   - variance: arpu_var
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "average revenue per user"
+  - table_position: 1
+  - positive: 1
 
 aov, $:
   - numerator: revenue
@@ -101,6 +125,8 @@ aov, $:
   - variance: arppu_var
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "average order value"
+  - table_position: 2
+  - positive: 1
 
 members -> install, %:
   - numerator: install_cnt
@@ -109,6 +135,8 @@ members -> install, %:
   - distribution: "bernoulli"
   - platforms: ["UG_WEB"]
   - description: "conversion rate from users in mobweb to users who installed the app"
+  - table_position: 4
+  - positive: 1
 
 subscriptions per user:
   - numerator: subscriptions_cnt
@@ -117,3 +145,5 @@ subscriptions per user:
   - variance: subscriptions_per_user_var
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "average number of subscriptions per user"
+  - table_position: 7
+  - positive: 1
