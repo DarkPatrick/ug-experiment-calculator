@@ -117,6 +117,9 @@ def calc_cumulative_aggregates(df: pd.DataFrame) -> pd.DataFrame:
 
 
 FUNNEL_ID_COLUMNS = [
+    "funnel_definition_key",
+    "funnel_definition_name",
+    "funnel_definition_description",
     "funnel_key",
     "funnel_name",
     "transition_key",
@@ -135,6 +138,10 @@ def calc_cumulative_funnel_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         df["conversion"] = pd.Series(dtype="float64")
         return df
+
+    for column in ("funnel_definition_key", "funnel_definition_name", "funnel_definition_description"):
+        if column not in df.columns:
+            df[column] = ""
 
     df["dt"] = pd.to_datetime(df["dt"])
     df["denominator_users"] = pd.to_numeric(df["denominator_users"], errors="coerce").fillna(0)
@@ -158,7 +165,7 @@ def calc_cumulative_funnel_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     )
     full_df[["denominator_users", "numerator_users"]] = full_df[["denominator_users", "numerator_users"]].fillna(0)
 
-    sort_columns = ["variation", "funnel_key", "from_step_order", "to_step_order", "dt"]
+    sort_columns = ["variation", "funnel_definition_key", "funnel_key", "from_step_order", "to_step_order", "dt"]
     full_df = full_df.sort_values(sort_columns).reset_index(drop=True)
     group_columns = ["variation", *FUNNEL_ID_COLUMNS]
     full_df[["denominator_users", "numerator_users"]] = full_df.groupby(group_columns, dropna=False)[
@@ -178,6 +185,45 @@ def normalize_metric_config(metric_items: list[dict]) -> dict:
     for item in metric_items:
         config.update(item)
     return config
+
+
+def metric_columns_for_client(metrics_yaml_path: str | Path, client: str) -> set[str]:
+    metrics_config = load_metrics_config(metrics_yaml_path)
+    columns = set()
+
+    for metric_items in metrics_config.values():
+        metric_config = normalize_metric_config(metric_items)
+        if client not in metric_config.get("platforms", []):
+            continue
+
+        for key in ("numerator", "denominator", "variance"):
+            value = metric_config.get(key)
+            if value:
+                columns.add(value)
+
+    return columns
+
+
+def load_funnels_config(funnels_yaml_path: str | Path) -> dict[str, Any]:
+    with Path(funnels_yaml_path).open("r", encoding="utf-8") as file:
+        return yaml.safe_load(file) or {}
+
+
+def normalize_funnel_config(funnel_items: list[dict]) -> dict:
+    config = {}
+    for item in funnel_items:
+        config.update(item)
+    return config
+
+
+def funnel_platforms(funnel_config: dict) -> list[str]:
+    conditions = funnel_config.get("conditions", {})
+    return funnel_config.get("platforms") or conditions.get("platforms", [])
+
+
+def funnel_enabled_for_client(funnel_config: dict, client: str) -> bool:
+    platforms = funnel_platforms(funnel_config)
+    return client in platforms
 
 
 def calc_stats(mean_0, mean_1, var_0, var_1, len_0, len_1, alpha=None, required_power=None, pvalue=None, calc_mean=False):

@@ -9,6 +9,7 @@ from pathlib import Path
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_QUERIES_DIR = PACKAGE_DIR / "queries"
 DEFAULT_METRICS_YAML_PATH = PACKAGE_DIR / "metrics.yaml"
+DEFAULT_FUNNELS_YAML_PATH = PACKAGE_DIR / "funnels.yaml"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -26,6 +27,7 @@ class ExperimentCalculatorConfig:
     subscriptions_start_date: datetime.date = datetime.date(2011, 6, 1)
     queries_dir: Path = DEFAULT_QUERIES_DIR
     metrics_yaml_path: Path = DEFAULT_METRICS_YAML_PATH
+    funnels_yaml_path: Path = DEFAULT_FUNNELS_YAML_PATH
     default_clients: tuple[str, ...] = ("UGT_IOS", "UGT_ANDROID", "UG_WEB")
     update_subscription_sources: bool = True
 
@@ -34,6 +36,7 @@ class ExperimentCalculatorConfig:
         start_date = os.environ.get(f"{prefix}SUBSCRIPTIONS_START_DATE", "2011-06-01")
         queries_dir = os.environ.get(f"{prefix}QUERIES_DIR")
         metrics_yaml_path = os.environ.get(f"{prefix}METRICS_YAML_PATH")
+        funnels_yaml_path = os.environ.get(f"{prefix}FUNNELS_YAML_PATH")
         default_clients = tuple(
             client.strip()
             for client in os.environ.get(f"{prefix}DEFAULT_CLIENTS", "UGT_IOS,UGT_ANDROID,UG_WEB").split(",")
@@ -47,6 +50,7 @@ class ExperimentCalculatorConfig:
             subscriptions_start_date=datetime.datetime.strptime(start_date, "%Y-%m-%d").date(),
             queries_dir=Path(queries_dir) if queries_dir else DEFAULT_QUERIES_DIR,
             metrics_yaml_path=Path(metrics_yaml_path) if metrics_yaml_path else DEFAULT_METRICS_YAML_PATH,
+            funnels_yaml_path=Path(funnels_yaml_path) if funnels_yaml_path else DEFAULT_FUNNELS_YAML_PATH,
             default_clients=default_clients,
             update_subscription_sources=_env_bool(f"{prefix}UPDATE_SUBSCRIPTION_SOURCES", True),
         )

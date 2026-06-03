@@ -22,5 +22,6 @@ include = ["ug_experiment_calculator*"]
 [tool.setuptools.package-data]
 ug_experiment_calculator = [
     "metrics.yaml",
+    "funnels.yaml",
     "queries/*.sql",
 ]

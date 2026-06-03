@@ -1,0 +1,6 @@
+tour_subscription_funnels:
+  - query: tour_subscription_funnels
+  - name: "Tour subscription funnels"
+  - description: "APP Funnels for Tour Install Pro trials, Tour Instant Offer charges, and Tour Post Decline Instant Offer subscriptions"
+  - conditions:
+      platforms: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]

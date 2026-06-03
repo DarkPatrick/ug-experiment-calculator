@@ -12,6 +12,10 @@ from .metrics import (
     calc_cumulative_funnel_aggregates,
     calc_funnel_stats_by_variation_pairs,
     calc_metrics_stats_by_variation_pairs,
+    funnel_enabled_for_client,
+    load_funnels_config,
+    metric_columns_for_client,
+    normalize_funnel_config,
 )
 from .repository import (
     create_exp_funnel_results_table,
@@ -22,16 +26,24 @@ from .repository import (
     create_experiments_subscription_table,
     drop_exp_partitions,
     drop_table,
+    ensure_table_columns,
     get_experiment,
+    get_funnel_metrics,
     get_monetization_metrics,
     get_segment_hash,
-    get_tour_subscription_funnels,
     update_exp_results_table,
     update_subscription_source_tables,
 )
 
 
 logger = logging.getLogger(__name__)
+
+
+FUNNEL_DEFINITION_COLUMNS = {
+    "funnel_definition_key": "String",
+    "funnel_definition_name": "String",
+    "funnel_definition_description": "String",
+}
 
 
 def _replace_exp_output_table(
@@ -44,6 +56,7 @@ def _replace_exp_output_table(
     full_table_name: str,
     create_table_func,
     config: ExperimentCalculatorConfig,
+    required_columns: Optional[dict[str, str]] = None,
 ) -> None:
     is_exists = execute_sql(f"exists {full_table_name}")
     if int(is_exists.iloc[0].values[0]) == 0:
@@ -52,6 +65,9 @@ def _replace_exp_output_table(
             return
         create_table_func(df, config=config)
         return
+
+    if required_columns:
+        ensure_table_columns(logical_table_name, required_columns, config=config)
 
     drop_exp_partitions(exp_id, client_name=client, segment=segment_name, table_name=logical_table_name, config=config)
     if df.empty:
@@ -68,6 +84,7 @@ def calculate_exp_info(
 ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame], dict[str, pd.DataFrame], str]:
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
+    funnels_config = load_funnels_config(cfg.funnels_yaml_path)
 
     if not exp_info.get("clients_list"):
         exp_info["clients_list"] = list(cfg.default_clients)
@@ -110,14 +127,31 @@ def calculate_exp_info(
             df_tot[(client, segment_name)] = df
 
             logger.info("Loading subscription funnels")
-            funnel_df = get_tour_subscription_funnels(
-                exp_users_table,
-                subscription_table,
-                client,
-                segment_name,
-                segment_hash,
-                config=cfg,
-            )
+            funnel_parts = []
+            for funnel_definition_key, funnel_items in funnels_config.items():
+                funnel_config = normalize_funnel_config(funnel_items)
+                if not funnel_enabled_for_client(funnel_config, client):
+                    continue
+
+                query_name = funnel_config.get("query", funnel_definition_key)
+                current_funnel_df = get_funnel_metrics(
+                    query_name,
+                    exp_users_table,
+                    subscription_table,
+                    client,
+                    segment_name,
+                    segment_hash,
+                    config=cfg,
+                )
+                if current_funnel_df.empty:
+                    continue
+
+                current_funnel_df["funnel_definition_key"] = funnel_definition_key
+                current_funnel_df["funnel_definition_name"] = funnel_config.get("name", funnel_definition_key)
+                current_funnel_df["funnel_definition_description"] = funnel_config.get("description", "")
+                funnel_parts.append(current_funnel_df)
+
+            funnel_df = pd.concat(funnel_parts, ignore_index=True) if funnel_parts else pd.DataFrame()
 
             logger.info("Calculating cumulative funnel aggregates")
             funnel_cum_df = calc_cumulative_funnel_aggregates(funnel_df)
@@ -143,6 +177,7 @@ def calculate_exp_info(
                 logical_table_name="ug_exp_funnel_stats",
                 full_table_name=cfg.exp_funnel_stats_table,
                 create_table_func=create_exp_funnel_stats_table,
+                required_columns=FUNNEL_DEFINITION_COLUMNS,
                 config=cfg,
             )
             _replace_exp_output_table(
@@ -153,6 +188,7 @@ def calculate_exp_info(
                 logical_table_name="ug_exp_funnel_results",
                 full_table_name=cfg.exp_funnel_results_table,
                 create_table_func=create_exp_funnel_results_table,
+                required_columns=FUNNEL_DEFINITION_COLUMNS,
                 config=cfg,
             )
 
@@ -170,6 +206,9 @@ def calculate_exp_info(
                 client=client,
             )
 
+            stats_metric_columns = metric_columns_for_client(cfg.metrics_yaml_path, client)
+            stats_metric_columns = [col for col in df_cum_agg.columns if col in stats_metric_columns]
+            df_cum_agg = df_cum_agg[["dt", "variation", *stats_metric_columns]]
             df_cum_agg = df_cum_agg.melt(id_vars=["dt", "variation"], var_name="metric", value_name="value")
             df_cum_agg["exp_id"] = exp_id
             df_cum_agg["client"] = client

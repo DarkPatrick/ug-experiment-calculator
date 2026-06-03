@@ -133,6 +133,9 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
     string_columns = [
         "dt",
         "metric",
+        "funnel_definition_key",
+        "funnel_definition_name",
+        "funnel_definition_description",
         "funnel_key",
         "funnel_name",
         "transition_key",
@@ -831,7 +834,7 @@ def get_monetization_metrics(
     subscription_table: str,
     client: str,
     segment_name: str,
-    segment_hash: str,
+    segment_hash: str = "",
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
@@ -855,12 +858,33 @@ def get_tour_subscription_funnels(
     subscription_table: str,
     client: str,
     segment_name: str,
-    segment_hash: str,
+    segment_hash: str = "",
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    return get_funnel_metrics(
+        "tour_subscription_funnels",
+        exp_users_table,
+        subscription_table,
+        client,
+        segment_name,
+        segment_hash,
+        config=config,
+    )
+
+
+def get_funnel_metrics(
+    query_name: str,
+    exp_users_table: str,
+    subscription_table: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str = "",
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     query = get_query(
-        "tour_subscription_funnels",
+        query_name,
         params={
             "exp_users_table": exp_users_table,
             "subscription_table": subscription_table,
@@ -870,7 +894,7 @@ def get_tour_subscription_funnels(
         },
         config=config,
     )
-    logger.info("tour subscription funnels query:\n%s", query)
+    logger.info("%s query:\n%s", query_name, query)
     return execute_sql(query)
 
 
@@ -903,6 +927,30 @@ def create_exp_funnel_stats_table(df: pd.DataFrame, *, config: Optional[Experime
 
 def create_exp_funnel_results_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     create_results_table("ug_exp_funnel_results", df, config=config)
+
+
+def ensure_table_columns(
+    table_name: str,
+    columns: dict[str, str],
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    full_table_name = cfg.full_table(table_name)
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        return
+
+    for column_name, column_type in columns.items():
+        if _table_has_column(full_table_name, column_name):
+            continue
+
+        query = f"""
+            alter table {full_table_name}
+            on cluster {cfg.cluster}
+            add column if not exists `{column_name}` {column_type} default ''
+        """
+        execute_sql_modify(query)
 
 
 def update_exp_results_table(df: pd.DataFrame, table: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
