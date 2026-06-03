@@ -119,11 +119,12 @@ def build_metric_echarts_code(
 
   var liftOption = {lift_option_json};
   liftOption.tooltip.formatter = function (params) {{
-    params = normalizeParams(params).filter(function (param) {{
+    var normalizedParams = normalizeParams(params);
+    params = normalizedParams.filter(function (param) {{
       return param.data && param.data.tooltipRole === 'lift';
     }});
 
-    var lines = ['date: ' + axisDate(params)];
+    var lines = ['date: ' + axisDate(normalizedParams)];
     params.forEach(function (param) {{
       var data = param.data;
       lines.push(param.marker + param.seriesName);
@@ -136,12 +137,67 @@ def build_metric_echarts_code(
   }};
 
   var ciOption = {ci_option_json};
+  function ciBandRenderItem(params, api) {{
+    var series = ciOption.series[params.seriesIndex];
+    var bandData = series.bandData || series.data || [];
+    if (params.dataIndex !== 0 || !bandData.length) {{
+      return {{type: 'group', children: []}};
+    }}
+
+    var children = [];
+    var highPoints = [];
+    var lowPoints = [];
+
+    function flushBand() {{
+      if (highPoints.length > 1 && lowPoints.length > 1) {{
+        children.push({{
+          type: 'polygon',
+          shape: {{
+            points: highPoints.concat(lowPoints.slice().reverse())
+          }},
+          style: {{
+            fill: series.bandColor,
+            stroke: null
+          }},
+          silent: true
+        }});
+      }}
+
+      highPoints = [];
+      lowPoints = [];
+    }}
+
+    bandData.forEach(function (item) {{
+      var value = item.value || [];
+      if (value[1] === null || value[1] === undefined || value[2] === null || value[2] === undefined) {{
+        flushBand();
+        return;
+      }}
+
+      highPoints.push(api.coord([value[0], value[2]]));
+      lowPoints.push(api.coord([value[0], value[1]]));
+    }});
+    flushBand();
+
+    return {{
+      type: 'group',
+      children: children
+    }};
+  }}
+
+  ciOption.series.forEach(function (series) {{
+    if (series.type === 'custom' && series.renderRole === 'ciBand') {{
+      series.renderItem = ciBandRenderItem;
+    }}
+  }});
+
   ciOption.tooltip.formatter = function (params) {{
-    params = normalizeParams(params).filter(function (param) {{
+    var normalizedParams = normalizeParams(params);
+    params = normalizedParams.filter(function (param) {{
       return param.data && param.data.tooltipRole === 'ciBand';
     }});
 
-    var lines = ['date: ' + axisDate(params)];
+    var lines = ['date: ' + axisDate(normalizedParams)];
     params.forEach(function (param) {{
       var data = param.data;
       lines.push(param.marker + param.seriesName);
@@ -251,13 +307,35 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
     for index, (variation_pair, group) in enumerate(grouped_rows):
         color = _rgb_color(index)
         fill_color = _rgba_color(index, 0.15)
-        stack_name = f"ci-band-{index}"
         sorted_group = group.sort_values("dt")
+
+        band_series = {
+            "name": variation_pair,
+            "type": "custom",
+            "renderRole": "ciBand",
+            "bandColor": fill_color,
+            "data": [
+                {
+                    "value": [
+                        _date_value(row["dt"]),
+                        _number_or_none(row["ci_low"]),
+                        _number_or_none(row["ci_high"]),
+                    ],
+                    "ciLow": _number_or_none(row["ci_low"]),
+                    "ciHigh": _number_or_none(row["ci_high"]),
+                    "pvalue": _number_or_none(row["pvalue"]),
+                    "tooltipRole": "ciBand",
+                }
+                for _, row in sorted_group.iterrows()
+            ],
+            "encode": {"x": 0, "y": [1, 2]},
+            "itemStyle": {"color": fill_color},
+            "z": 1,
+        }
 
         low_series = {
             "name": variation_pair,
             "type": "line",
-            "stack": stack_name,
             "showSymbol": False,
             "connectNulls": False,
             "data": [
@@ -270,6 +348,7 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
             "lineStyle": {"width": 2, "color": color},
             "itemStyle": {"color": color},
             "tooltip": {"show": False},
+            "z": 2,
         }
         if not series:
             low_series["markLine"] = _zero_mark_line()
@@ -277,25 +356,22 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
         high_series = {
             "name": variation_pair,
             "type": "line",
-            "stack": stack_name,
             "showSymbol": False,
             "connectNulls": False,
             "data": [
                 {
-                    "value": [_date_value(row["dt"]), _ci_range(row["ci_low"], row["ci_high"])],
-                    "ciLow": _number_or_none(row["ci_low"]),
-                    "ciHigh": _number_or_none(row["ci_high"]),
-                    "pvalue": _number_or_none(row["pvalue"]),
-                    "tooltipRole": "ciBand",
+                    "value": [_date_value(row["dt"]), _number_or_none(row["ci_high"])],
+                    "tooltipRole": "ciHigh",
                 }
                 for _, row in sorted_group.iterrows()
             ],
-            "areaStyle": {"color": fill_color},
             "lineStyle": {"width": 2, "color": color},
             "itemStyle": {"color": color},
+            "tooltip": {"show": False},
+            "z": 2,
         }
 
-        series.extend([low_series, high_series])
+        series.extend([band_series, low_series, high_series])
 
     return {
         "color": [_rgb_color(index) for index in range(len(grouped_rows))],
@@ -345,11 +421,3 @@ def _number_or_none(value: Any) -> float | None:
     if not np.isfinite(number_value):
         return None
     return number_value
-
-
-def _ci_range(low: Any, high: Any) -> float | None:
-    low_number = _number_or_none(low)
-    high_number = _number_or_none(high)
-    if low_number is None or high_number is None:
-        return None
-    return high_number - low_number
