@@ -111,9 +111,15 @@ def build_metric_echarts_code(
   }}
 
   function axisDate(params) {{
-    var firstParam = params[0] || {{}};
-    if (firstParam.axisValueLabel) return firstParam.axisValueLabel;
-    if (Array.isArray(firstParam.value)) return firstParam.value[0];
+    for (var i = 0; i < params.length; i++) {{
+      if (params[i].axisValueLabel) return params[i].axisValueLabel;
+    }}
+    for (var j = 0; j < params.length; j++) {{
+      var value = params[j].value;
+      if (!Array.isArray(value)) continue;
+      if (typeof value[0] === 'string') return value[0];
+      if (typeof value[1] === 'string') return value[1];
+    }}
     return '';
   }}
 
@@ -137,61 +143,6 @@ def build_metric_echarts_code(
   }};
 
   var ciOption = {ci_option_json};
-  function ciBandRenderItem(params, api) {{
-    var series = ciOption.series[params.seriesIndex];
-    var bandData = series.bandData || series.data || [];
-    if (params.dataIndex !== 0 || !bandData.length) {{
-      return {{type: 'group', children: []}};
-    }}
-
-    var children = [];
-    var highPoints = [];
-    var lowPoints = [];
-
-    function flushBand() {{
-      if (highPoints.length > 1 && lowPoints.length > 1) {{
-        children.push({{
-          type: 'polygon',
-          shape: {{
-            points: highPoints.concat(lowPoints.slice().reverse())
-          }},
-          style: {{
-            fill: series.bandColor,
-            stroke: null
-          }},
-          silent: true
-        }});
-      }}
-
-      highPoints = [];
-      lowPoints = [];
-    }}
-
-    bandData.forEach(function (item) {{
-      var value = item.value || [];
-      if (value[1] === null || value[1] === undefined || value[2] === null || value[2] === undefined) {{
-        flushBand();
-        return;
-      }}
-
-      var xValue = typeof value[0] === 'string' ? new Date(value[0]).getTime() : value[0];
-      highPoints.push(api.coord([xValue, value[2]]));
-      lowPoints.push(api.coord([xValue, value[1]]));
-    }});
-    flushBand();
-
-    return {{
-      type: 'group',
-      children: children
-    }};
-  }}
-
-  ciOption.series.forEach(function (series) {{
-    if (series.type === 'custom' && series.renderRole === 'ciBand') {{
-      series.renderItem = ciBandRenderItem;
-    }}
-  }});
-
   ciOption.tooltip.formatter = function (params) {{
     var normalizedParams = normalizeParams(params);
     params = normalizedParams.filter(function (param) {{
@@ -308,20 +259,47 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
     for index, (variation_pair, group) in enumerate(grouped_rows):
         color = _rgb_color(index)
         fill_color = _rgba_color(index, 0.15)
+        stack_name = f"ci-band-{index}"
         sorted_group = group.sort_values("dt")
 
-        band_series = {
+        band_base_series = {
             "name": variation_pair,
-            "type": "custom",
-            "coordinateSystem": "cartesian2d",
-            "renderRole": "ciBand",
-            "bandColor": fill_color,
+            "type": "line",
+            "stack": stack_name,
+            "stackStrategy": "all",
+            "showSymbol": False,
+            "connectNulls": False,
             "data": [
                 {
                     "value": [
-                        _date_value(row["dt"]),
                         _number_or_none(row["ci_low"]),
-                        _number_or_none(row["ci_high"]),
+                        _date_value(row["dt"]),
+                    ],
+                    "tooltipRole": "ciBandBase",
+                }
+                for _, row in sorted_group.iterrows()
+            ],
+            "encode": {"x": 1, "y": 0},
+            "lineStyle": {"width": 0, "opacity": 0},
+            "itemStyle": {"opacity": 0},
+            "tooltip": {"show": False},
+            "z": 1,
+        }
+        if not series:
+            band_base_series["markLine"] = _zero_mark_line()
+
+        band_area_series = {
+            "name": variation_pair,
+            "type": "line",
+            "stack": stack_name,
+            "stackStrategy": "all",
+            "showSymbol": False,
+            "connectNulls": False,
+            "data": [
+                {
+                    "value": [
+                        _ci_range(row["ci_low"], row["ci_high"]),
+                        _date_value(row["dt"]),
                     ],
                     "ciLow": _number_or_none(row["ci_low"]),
                     "ciHigh": _number_or_none(row["ci_high"]),
@@ -330,7 +308,9 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
                 }
                 for _, row in sorted_group.iterrows()
             ],
-            "encode": {"x": 0, "y": [1, 2]},
+            "encode": {"x": 1, "y": 0},
+            "areaStyle": {"color": fill_color},
+            "lineStyle": {"width": 0, "opacity": 0},
             "itemStyle": {"color": fill_color},
             "z": 1,
         }
@@ -352,8 +332,6 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
             "tooltip": {"show": False},
             "z": 2,
         }
-        if not series:
-            low_series["markLine"] = _zero_mark_line()
 
         high_series = {
             "name": variation_pair,
@@ -373,7 +351,7 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
             "z": 2,
         }
 
-        series.extend([band_series, low_series, high_series])
+        series.extend([band_base_series, band_area_series, low_series, high_series])
 
     return {
         "color": [_rgb_color(index) for index in range(len(grouped_rows))],
@@ -423,3 +401,11 @@ def _number_or_none(value: Any) -> float | None:
     if not np.isfinite(number_value):
         return None
     return number_value
+
+
+def _ci_range(low: Any, high: Any) -> float | None:
+    low_number = _number_or_none(low)
+    high_number = _number_or_none(high)
+    if low_number is None or high_number is None:
+        return None
+    return high_number - low_number
