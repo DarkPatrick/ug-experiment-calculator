@@ -170,8 +170,11 @@ def _build_segment_rows(df: pd.DataFrame, metric_configs: list[_MetricTableConfi
 
 
 def _header_row(metric_configs: list[_MetricTableConfig]) -> str:
-    cells = [_cell("Variation", background=HEADER_COLOR, bold=True)]
-    cells.extend(_cell(metric_config.name, background=HEADER_COLOR, bold=True) for metric_config in metric_configs)
+    cells = [_cell("Variation", background=HEADER_COLOR, bold=True, align="left")]
+    cells.extend(
+        _cell(metric_config.name, background=HEADER_COLOR, bold=True, align="left")
+        for metric_config in metric_configs
+    )
     return _row(cells)
 
 
@@ -397,11 +400,11 @@ def _row(cells: list[str]) -> str:
 
 
 def _row_header_cell(value: str) -> str:
-    return _cell(value, background=HEADER_COLOR, bold=True)
+    return _cell(value, background=HEADER_COLOR, bold=True, align="left")
 
 
 def _segment_row(segment: str, colspan: int) -> str:
-    return _row([_cell(segment, background=HEADER_COLOR, bold=True, colspan=colspan)])
+    return _row([_cell(segment, background=HEADER_COLOR, bold=True, colspan=colspan, align="left")])
 
 
 def _cell(
@@ -411,21 +414,37 @@ def _cell(
     bold: bool = False,
     colspan: int | None = None,
     raw: bool = False,
+    align: str = "right",
 ) -> str:
-    attributes = []
-    if background:
-        attributes.append(f'data-highlight-colour="{escape(background)}"')
-    if colspan is not None:
-        attributes.append(f'colspan="{int(colspan)}"')
-    attributes_str = " " + " ".join(attributes) if attributes else ""
+    attributes = _cell_attributes(background=background, colspan=colspan, align=align)
 
     if raw:
-        return f"<td{attributes_str}>{value}</td>"
+        return f"<td{attributes}>{value}</td>"
 
     escaped_value = escape(str(value))
     if bold:
         escaped_value = f"<strong>{escaped_value}</strong>"
-    return f"<td{attributes_str}><p>{escaped_value}</p></td>"
+    return f"<td{attributes}><p>{escaped_value}</p></td>"
+
+
+def _cell_attributes(
+    *,
+    background: str | None,
+    colspan: int | None,
+    align: str,
+) -> str:
+    attributes = []
+    if background:
+        escaped_background = escape(background)
+        attributes.append(f'class="highlight-{escaped_background} confluenceTd"')
+        attributes.append(f'data-highlight-colour="{escaped_background}"')
+        attributes.append(f'bgcolor="{escaped_background}"')
+    if align:
+        attributes.append(f'style="text-align:{escape(align)}"')
+    if colspan is not None:
+        attributes.append(f'colspan="{int(colspan)}"')
+
+    return " " + " ".join(attributes) if attributes else ""
 
 
 def _ui_expand(title: str, body: str) -> str:
