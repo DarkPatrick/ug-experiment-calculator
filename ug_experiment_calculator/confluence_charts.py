@@ -14,13 +14,14 @@ from .value_formatting import format_plain_number
 
 
 CONFLUENCE_DATE_FORMAT = "yyyy-MM-dd"
-SIGNIFICANCE_LEVEL_SERIES_NAME = "p = 0.05"
+SIGNIFICANCE_LEVEL_SERIES_NAME = "α = 0.05"
 SIGNIFICANCE_LEVEL_COLOR = "#ff0000"
+PVALUE_CHART_SUBTITLE = "p-value"
+LIFT_CHART_SUBTITLE = "lift, %"
 
-CONFLUENCE_CHART_COLUMNS: tuple[str, ...] = (
+CONFLUENCE_CHART_BASE_COLUMNS: tuple[str, ...] = (
     "dt",
     "variation_pair",
-    "pvalue",
 )
 
 
@@ -43,6 +44,7 @@ def get_metric_confluence_chart_data(
             `variation_pair`,
             `control_variation`,
             `test_variation`,
+            `lift`,
             `pvalue`
         from {cfg.exp_results_table}
         where
@@ -64,19 +66,70 @@ def build_metric_confluence_chart_code(
     *,
     output_format: Literal["storage", "wiki"] = "storage",
     width: int = 250,
-    height: int = 250,
+    height: int = 125,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
     max_x_ticks: int = 2,
-    title_placement: Literal["subtitle", "title", "none"] = "none",
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = PVALUE_CHART_SUBTITLE,
     image_format: str = "png",
 ) -> str:
     chart_data = _prepare_chart_data(
         rows,
-        include_significance_level=include_significance_level,
-        significance_level=significance_level,
+        value_column="pvalue",
+        constant_series_name=SIGNIFICANCE_LEVEL_SERIES_NAME if include_significance_level else None,
+        constant_value=significance_level if include_significance_level else None,
     )
-    title = f"Cumulative p-value for {metric} by date"
+    domain_axis_tick_unit = _domain_axis_tick_unit(chart_data.dates, max_x_ticks=max_x_ticks)
+
+    if output_format == "storage":
+        return _build_storage_chart_code(
+            chart_data,
+            title=title,
+            width=width,
+            height=height,
+            domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
+            image_format=image_format,
+            range_axis_lower_bound=0,
+            range_axis_upper_bound=1,
+            range_axis_tick_unit=0.25,
+        )
+    if output_format == "wiki":
+        return _build_wiki_chart_code(
+            chart_data,
+            title=title,
+            width=width,
+            height=height,
+            domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
+            image_format=image_format,
+            range_axis_lower_bound=0,
+            range_axis_upper_bound=1,
+            range_axis_tick_unit=0.25,
+        )
+
+    raise ValueError(f"Unsupported output_format: {output_format}")
+
+
+def build_metric_confluence_lift_chart_code(
+    rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    metric: str,
+    *,
+    output_format: Literal["storage", "wiki"] = "storage",
+    width: int = 250,
+    height: int = 125,
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = LIFT_CHART_SUBTITLE,
+    image_format: str = "png",
+) -> str:
+    chart_data = _prepare_chart_data(
+        rows,
+        value_column="lift",
+        constant_series_name=None,
+        constant_value=None,
+    )
     domain_axis_tick_unit = _domain_axis_tick_unit(chart_data.dates, max_x_ticks=max_x_ticks)
 
     if output_format == "storage":
@@ -111,11 +164,12 @@ def get_metric_confluence_chart_code(
     *,
     output_format: Literal["storage", "wiki"] = "storage",
     width: int = 250,
-    height: int = 250,
+    height: int = 125,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
     max_x_ticks: int = 2,
-    title_placement: Literal["subtitle", "title", "none"] = "none",
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = PVALUE_CHART_SUBTITLE,
     image_format: str = "png",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
@@ -130,6 +184,36 @@ def get_metric_confluence_chart_code(
         significance_level=significance_level,
         max_x_ticks=max_x_ticks,
         title_placement=title_placement,
+        title=title,
+        image_format=image_format,
+    )
+
+
+def get_metric_confluence_lift_chart_code(
+    exp_id: int,
+    metric: str,
+    client: str,
+    segment: str,
+    *,
+    output_format: Literal["storage", "wiki"] = "storage",
+    width: int = 250,
+    height: int = 125,
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = LIFT_CHART_SUBTITLE,
+    image_format: str = "png",
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
+    return build_metric_confluence_lift_chart_code(
+        rows,
+        metric,
+        output_format=output_format,
+        width=width,
+        height=height,
+        max_x_ticks=max_x_ticks,
+        title_placement=title_placement,
+        title=title,
         image_format=image_format,
     )
 
@@ -144,18 +228,20 @@ class _ChartData:
 def _prepare_chart_data(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
-    include_significance_level: bool,
-    significance_level: float,
+    value_column: str,
+    constant_series_name: str | None,
+    constant_value: float | None,
 ) -> _ChartData:
     df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
+    required_columns = (*CONFLUENCE_CHART_BASE_COLUMNS, value_column)
 
     if df.empty:
-        for column in CONFLUENCE_CHART_COLUMNS:
+        for column in required_columns:
             if column not in df.columns:
                 df[column] = pd.Series(dtype="object")
         return _ChartData(dates=[], series_names=[], values_by_date={})
 
-    missing_columns = set(CONFLUENCE_CHART_COLUMNS).difference(df.columns)
+    missing_columns = set(required_columns).difference(df.columns)
     if missing_columns:
         missing_columns_str = ", ".join(sorted(missing_columns))
         raise ValueError(f"Missing Confluence chart columns: {missing_columns_str}")
@@ -163,7 +249,7 @@ def _prepare_chart_data(
     df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
     df = df.dropna(subset=["dt", "variation_pair"]).copy()
     df["variation_pair"] = df["variation_pair"].astype(str)
-    df["pvalue"] = pd.to_numeric(df["pvalue"], errors="coerce")
+    df[value_column] = pd.to_numeric(df[value_column], errors="coerce")
 
     sort_columns = ["variation_pair", "dt"]
     if {"control_variation", "test_variation"}.issubset(df.columns):
@@ -173,17 +259,17 @@ def _prepare_chart_data(
 
     dates = sorted(df["date_value"].dropna().unique().tolist())
     series_names = [str(name) for name in df["variation_pair"].drop_duplicates().tolist()]
-    if include_significance_level:
-        series_names.append(SIGNIFICANCE_LEVEL_SERIES_NAME)
+    if constant_series_name is not None:
+        series_names.append(constant_series_name)
 
     values_by_date: dict[str, dict[str, float | None]] = {date: {} for date in dates}
     for _, row in df.iterrows():
-        values_by_date[row["date_value"]][row["variation_pair"]] = _number_or_none(row["pvalue"])
+        values_by_date[row["date_value"]][row["variation_pair"]] = _number_or_none(row[value_column])
 
-    if include_significance_level:
-        significance_value = _number_or_none(significance_level)
+    if constant_series_name is not None:
+        constant_number = _number_or_none(constant_value)
         for date in dates:
-            values_by_date[date][SIGNIFICANCE_LEVEL_SERIES_NAME] = significance_value
+            values_by_date[date][constant_series_name] = constant_number
 
     return _ChartData(dates=dates, series_names=series_names, values_by_date=values_by_date)
 
@@ -197,6 +283,9 @@ def _build_storage_chart_code(
     domain_axis_tick_unit: int,
     title_placement: Literal["subtitle", "title", "none"],
     image_format: str,
+    range_axis_lower_bound: float | None = None,
+    range_axis_upper_bound: float | None = None,
+    range_axis_tick_unit: float | None = None,
 ) -> str:
     parameters = _chart_parameters(
         title=title,
@@ -206,6 +295,9 @@ def _build_storage_chart_code(
         title_placement=title_placement,
         image_format=image_format,
         colors=_series_colors(chart_data.series_names),
+        range_axis_lower_bound=range_axis_lower_bound,
+        range_axis_upper_bound=range_axis_upper_bound,
+        range_axis_tick_unit=range_axis_tick_unit,
     )
 
     lines = ['<ac:structured-macro ac:name="chart">']
@@ -227,6 +319,9 @@ def _build_wiki_chart_code(
     domain_axis_tick_unit: int,
     title_placement: Literal["subtitle", "title", "none"],
     image_format: str,
+    range_axis_lower_bound: float | None = None,
+    range_axis_upper_bound: float | None = None,
+    range_axis_tick_unit: float | None = None,
 ) -> str:
     parameters = _chart_parameters(
         title=title,
@@ -236,6 +331,9 @@ def _build_wiki_chart_code(
         title_placement=title_placement,
         image_format=image_format,
         colors=_series_colors(chart_data.series_names),
+        range_axis_lower_bound=range_axis_lower_bound,
+        range_axis_upper_bound=range_axis_upper_bound,
+        range_axis_tick_unit=range_axis_tick_unit,
     )
     params_str = "|".join(f"{name}={value}" for name, value in parameters)
     lines = [f"{{chart:{params_str}}}"]
@@ -253,6 +351,9 @@ def _chart_parameters(
     title_placement: Literal["subtitle", "title", "none"],
     image_format: str,
     colors: list[str],
+    range_axis_lower_bound: float | None,
+    range_axis_upper_bound: float | None,
+    range_axis_tick_unit: float | None,
 ) -> list[tuple[str, str | int]]:
     parameters: list[tuple[str, str | int]] = [
         ("type", "timeSeries"),
@@ -266,13 +367,16 @@ def _chart_parameters(
         ("domainAxisTickUnit", int(domain_axis_tick_unit)),
         ("domainAxisLabelAngle", "45"),
         ("dateTickMarkPosition", "middle"),
-        ("rangeAxisLowerBound", "0"),
-        ("rangeAxisUpperBound", "1"),
-        ("rangeAxisTickUnit", "0.25"),
         ("showShapes", "false"),
         ("dataDisplay", "false"),
         ("imageFormat", image_format),
     ]
+    if range_axis_lower_bound is not None:
+        parameters.append(("rangeAxisLowerBound", _parameter_number(range_axis_lower_bound)))
+    if range_axis_upper_bound is not None:
+        parameters.append(("rangeAxisUpperBound", _parameter_number(range_axis_upper_bound)))
+    if range_axis_tick_unit is not None:
+        parameters.append(("rangeAxisTickUnit", _parameter_number(range_axis_tick_unit)))
     if title_placement == "title":
         parameters.insert(0, ("title", title))
     elif title_placement == "subtitle":
@@ -326,6 +430,10 @@ def _series_colors(series_names: list[str]) -> list[str]:
     if series_names and series_names[-1] == SIGNIFICANCE_LEVEL_SERIES_NAME:
         colors[-1] = SIGNIFICANCE_LEVEL_COLOR
     return colors
+
+
+def _parameter_number(value: float) -> str:
+    return f"{value:g}"
 
 
 def _hex_color(index: int) -> str:

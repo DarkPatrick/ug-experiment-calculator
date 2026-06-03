@@ -10,7 +10,10 @@ from typing import Any, Optional
 import pandas as pd
 
 from .config import ExperimentCalculatorConfig
-from .confluence_charts import build_metric_confluence_chart_code
+from .confluence_charts import (
+    build_metric_confluence_chart_code,
+    build_metric_confluence_lift_chart_code,
+)
 from .metrics import load_metrics_config, normalize_metric_config
 from .value_formatting import (
     format_diff_percent,
@@ -239,7 +242,10 @@ def _cumulatives_row(df: pd.DataFrame, metric_configs: list[_MetricTableConfig])
             cells.append(_cell(""))
             continue
 
-        chart_code = build_metric_confluence_chart_code(metric_rows, metric_config.name)
+        chart_code = "\n".join([
+            build_metric_confluence_chart_code(metric_rows, metric_config.name),
+            build_metric_confluence_lift_chart_code(metric_rows, metric_config.name),
+        ])
         cells.append(_cell(chart_code, raw=True))
     return _row(cells)
 

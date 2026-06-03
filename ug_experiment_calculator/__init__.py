@@ -2,8 +2,10 @@ from .calculator import calculate_exp_info
 from .config import ExperimentCalculatorConfig
 from .confluence_charts import (
     build_metric_confluence_chart_code,
+    build_metric_confluence_lift_chart_code,
     get_metric_confluence_chart_code,
     get_metric_confluence_chart_data,
+    get_metric_confluence_lift_chart_code,
 )
 from .confluence_tables import (
     build_experiment_confluence_table_code,
@@ -66,6 +68,7 @@ __all__ = [
     "ExperimentCalculatorConfig",
     "build_experiment_confluence_table_code",
     "build_metric_confluence_chart_code",
+    "build_metric_confluence_lift_chart_code",
     "build_metric_echarts_code",
     "build_metric_echarts_options",
     "calc_cumulative_aggregates",
@@ -99,6 +102,7 @@ __all__ = [
     "get_monetization_metrics",
     "get_metric_confluence_chart_code",
     "get_metric_confluence_chart_data",
+    "get_metric_confluence_lift_chart_code",
     "get_metric_echarts_code",
     "get_metric_echarts_data",
     "get_segment_hash",
