@@ -66,8 +66,9 @@ def build_metric_confluence_chart_code(
     height: int = 250,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
-    max_x_ticks: int = 1,
-    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "none",
+    image_format: str = "svg",
 ) -> str:
     chart_data = _prepare_chart_data(
         rows,
@@ -85,6 +86,7 @@ def build_metric_confluence_chart_code(
             height=height,
             domain_axis_tick_unit=domain_axis_tick_unit,
             title_placement=title_placement,
+            image_format=image_format,
         )
     if output_format == "wiki":
         return _build_wiki_chart_code(
@@ -94,6 +96,7 @@ def build_metric_confluence_chart_code(
             height=height,
             domain_axis_tick_unit=domain_axis_tick_unit,
             title_placement=title_placement,
+            image_format=image_format,
         )
 
     raise ValueError(f"Unsupported output_format: {output_format}")
@@ -110,8 +113,9 @@ def get_metric_confluence_chart_code(
     height: int = 250,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
-    max_x_ticks: int = 1,
-    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "none",
+    image_format: str = "svg",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
@@ -125,6 +129,7 @@ def get_metric_confluence_chart_code(
         significance_level=significance_level,
         max_x_ticks=max_x_ticks,
         title_placement=title_placement,
+        image_format=image_format,
     )
 
 
@@ -190,6 +195,7 @@ def _build_storage_chart_code(
     height: int,
     domain_axis_tick_unit: int,
     title_placement: Literal["subtitle", "title", "none"],
+    image_format: str,
 ) -> str:
     parameters = _chart_parameters(
         title=title,
@@ -197,6 +203,7 @@ def _build_storage_chart_code(
         height=height,
         domain_axis_tick_unit=domain_axis_tick_unit,
         title_placement=title_placement,
+        image_format=image_format,
         colors=_series_colors(chart_data.series_names),
     )
 
@@ -218,6 +225,7 @@ def _build_wiki_chart_code(
     height: int,
     domain_axis_tick_unit: int,
     title_placement: Literal["subtitle", "title", "none"],
+    image_format: str,
 ) -> str:
     parameters = _chart_parameters(
         title=title,
@@ -225,6 +233,7 @@ def _build_wiki_chart_code(
         height=height,
         domain_axis_tick_unit=domain_axis_tick_unit,
         title_placement=title_placement,
+        image_format=image_format,
         colors=_series_colors(chart_data.series_names),
     )
     params_str = "|".join(f"{name}={value}" for name, value in parameters)
@@ -241,6 +250,7 @@ def _chart_parameters(
     height: int,
     domain_axis_tick_unit: int,
     title_placement: Literal["subtitle", "title", "none"],
+    image_format: str,
     colors: list[str],
 ) -> list[tuple[str, str | int]]:
     parameters: list[tuple[str, str | int]] = [
@@ -260,7 +270,7 @@ def _chart_parameters(
         ("rangeAxisTickUnit", "0.25"),
         ("showShapes", "false"),
         ("dataDisplay", "false"),
-        ("imageFormat", "png"),
+        ("imageFormat", image_format),
     ]
     if title_placement == "title":
         parameters.insert(0, ("title", title))

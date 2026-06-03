@@ -324,13 +324,13 @@ chart_code = get_metric_confluence_chart_code(
 
 - размер `250x250`;
 - тип `timeSeries`;
-- заголовок `Cumulative p-value for <metric> by date`, по умолчанию передается как `subTitle`, чтобы Confluence рисовал его меньшим шрифтом;
+- заголовок внутри Chart macro по умолчанию отключен, чтобы маленький график не терял полезную область;
 - ось X содержит даты в формате `yyyy-MM-dd`;
 - ось Y содержит `pvalue` для каждой пары вариаций;
 - легенда включена;
 - добавляется красная серия `p = 0.05` как уровень значимости.
 
-Для компактного графика `max_x_ticks` по умолчанию равен `1`, поэтому Confluence почти не рисует подписи дат на оси X. Чтобы вернуть более частые даты или обычный крупный заголовок:
+Для компактного графика `max_x_ticks` по умолчанию равен `2`, поэтому Confluence рисует очень мало подписей дат на оси X. `image_format` по умолчанию `svg`, чтобы маленький график выглядел менее мыльным. Чтобы вернуть заголовок или PNG:
 
 ```python
 chart_code = get_metric_confluence_chart_code(
@@ -339,7 +339,8 @@ chart_code = get_metric_confluence_chart_code(
     client="UG_WEB",
     segment="Total",
     max_x_ticks=3,
-    title_placement="title",
+    title_placement="subtitle",
+    image_format="png",
 )
 ```
 
