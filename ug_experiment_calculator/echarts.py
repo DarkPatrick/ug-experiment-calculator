@@ -174,8 +174,9 @@ def build_metric_echarts_code(
         return;
       }}
 
-      highPoints.push(api.coord([value[0], value[2]]));
-      lowPoints.push(api.coord([value[0], value[1]]));
+      var xValue = typeof value[0] === 'string' ? new Date(value[0]).getTime() : value[0];
+      highPoints.push(api.coord([xValue, value[2]]));
+      lowPoints.push(api.coord([xValue, value[1]]));
     }});
     flushBand();
 
@@ -312,6 +313,7 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
         band_series = {
             "name": variation_pair,
             "type": "custom",
+            "coordinateSystem": "cartesian2d",
             "renderRole": "ciBand",
             "bandColor": fill_color,
             "data": [
