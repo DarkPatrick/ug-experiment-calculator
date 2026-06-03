@@ -259,48 +259,16 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
     for index, (variation_pair, group) in enumerate(grouped_rows):
         color = _rgb_color(index)
         fill_color = _rgba_color(index, 0.15)
-        stack_name = f"ci-band-{index}"
         sorted_group = group.sort_values("dt")
 
-        band_base_series = {
+        band_high_area_series = {
             "name": variation_pair,
             "type": "line",
-            "stack": stack_name,
-            "stackStrategy": "all",
             "showSymbol": False,
             "connectNulls": False,
             "data": [
                 {
-                    "value": [
-                        _number_or_none(row["ci_low"]),
-                        _date_value(row["dt"]),
-                    ],
-                    "tooltipRole": "ciBandBase",
-                }
-                for _, row in sorted_group.iterrows()
-            ],
-            "encode": {"x": 1, "y": 0},
-            "lineStyle": {"width": 0, "opacity": 0},
-            "itemStyle": {"opacity": 0},
-            "tooltip": {"show": False},
-            "z": 1,
-        }
-        if not series:
-            band_base_series["markLine"] = _zero_mark_line()
-
-        band_area_series = {
-            "name": variation_pair,
-            "type": "line",
-            "stack": stack_name,
-            "stackStrategy": "all",
-            "showSymbol": False,
-            "connectNulls": False,
-            "data": [
-                {
-                    "value": [
-                        _ci_range(row["ci_low"], row["ci_high"]),
-                        _date_value(row["dt"]),
-                    ],
+                    "value": [_date_value(row["dt"]), _number_or_none(row["ci_high"])],
                     "ciLow": _number_or_none(row["ci_low"]),
                     "ciHigh": _number_or_none(row["ci_high"]),
                     "pvalue": _number_or_none(row["pvalue"]),
@@ -308,11 +276,31 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
                 }
                 for _, row in sorted_group.iterrows()
             ],
-            "encode": {"x": 1, "y": 0},
-            "areaStyle": {"color": fill_color},
+            "areaStyle": {"color": fill_color, "origin": "start"},
             "lineStyle": {"width": 0, "opacity": 0},
             "itemStyle": {"color": fill_color},
             "z": 1,
+        }
+        if not series:
+            band_high_area_series["markLine"] = _zero_mark_line()
+
+        band_low_mask_series = {
+            "name": variation_pair,
+            "type": "line",
+            "showSymbol": False,
+            "connectNulls": False,
+            "data": [
+                {
+                    "value": [_date_value(row["dt"]), _number_or_none(row["ci_low"])],
+                    "tooltipRole": "ciBandMask",
+                }
+                for _, row in sorted_group.iterrows()
+            ],
+            "areaStyle": {"color": "rgba(255, 255, 255, 1)", "origin": "start"},
+            "lineStyle": {"width": 0, "opacity": 0},
+            "itemStyle": {"color": "rgba(255, 255, 255, 1)"},
+            "tooltip": {"show": False},
+            "z": 2,
         }
 
         low_series = {
@@ -330,7 +318,7 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
             "lineStyle": {"width": 2, "color": color},
             "itemStyle": {"color": color},
             "tooltip": {"show": False},
-            "z": 2,
+            "z": 3,
         }
 
         high_series = {
@@ -348,10 +336,10 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
             "lineStyle": {"width": 2, "color": color},
             "itemStyle": {"color": color},
             "tooltip": {"show": False},
-            "z": 2,
+            "z": 3,
         }
 
-        series.extend([band_base_series, band_area_series, low_series, high_series])
+        series.extend([band_high_area_series, band_low_mask_series, low_series, high_series])
 
     return {
         "color": [_rgb_color(index) for index in range(len(grouped_rows))],
@@ -401,11 +389,3 @@ def _number_or_none(value: Any) -> float | None:
     if not np.isfinite(number_value):
         return None
     return number_value
-
-
-def _ci_range(low: Any, high: Any) -> float | None:
-    low_number = _number_or_none(low)
-    high_number = _number_or_none(high)
-    if low_number is None or high_number is None:
-        return None
-    return high_number - low_number
