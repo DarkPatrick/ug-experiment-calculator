@@ -1,5 +1,11 @@
 from .calculator import calculate_exp_info
 from .config import ExperimentCalculatorConfig
+from .echarts import (
+    build_metric_echarts_code,
+    build_metric_echarts_options,
+    get_metric_echarts_code,
+    get_metric_echarts_data,
+)
 from .metrics import (
     calc_cumulative_aggregates,
     calc_cumulative_funnel_aggregates,
@@ -40,6 +46,8 @@ from .repository import (
 
 __all__ = [
     "ExperimentCalculatorConfig",
+    "build_metric_echarts_code",
+    "build_metric_echarts_options",
     "calc_cumulative_aggregates",
     "calc_cumulative_funnel_aggregates",
     "calc_funnel_stats_by_variation_pairs",
@@ -62,6 +70,8 @@ __all__ = [
     "get_exps_list",
     "get_funnel_metrics",
     "get_monetization_metrics",
+    "get_metric_echarts_code",
+    "get_metric_echarts_data",
     "get_segment_hash",
     "get_tour_subscription_funnels",
     "get_ugg_exps_list",
