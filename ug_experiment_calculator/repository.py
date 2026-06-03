@@ -9,6 +9,7 @@ import math
 import random
 import re
 import string
+import textwrap
 from typing import Optional
 
 from clickhouse_worker import (
@@ -22,6 +23,7 @@ from clickhouse_worker import (
 )
 import numpy as np
 import pandas as pd
+import yaml
 
 from .config import ExperimentCalculatorConfig
 
@@ -268,32 +270,132 @@ def parse_configuration_project(row) -> str:
 def parse_configuration_segments(row) -> dict:
     default_segments = {"Total": {"pro_rights": "All"}}
     text = str(row)
-    if not text or "segments:" not in text:
+    if not text:
         return default_segments
 
-    start_match = re.search(r"segments:\s*", text)
-    if not start_match:
-        return default_segments
+    full_config = _parse_configuration_value(text)
+    parsed_segments = _normalize_segments(full_config.get("segments") if isinstance(full_config, dict) else None)
+    if parsed_segments:
+        return _with_total_segment(parsed_segments)
 
-    first_brace = text.find("{", start_match.end())
-    if first_brace == -1:
-        return default_segments
+    segments_text = _extract_balanced_config_value(text, "segments")
+    if segments_text:
+        parsed_segments = _normalize_segments(_parse_configuration_value(segments_text))
+        if parsed_segments:
+            return _with_total_segment(parsed_segments)
 
-    depth = 0
-    for index in range(first_brace, len(text)):
-        if text[index] == "{":
-            depth += 1
-        elif text[index] == "}":
-            depth -= 1
-
-            if depth == 0:
-                dict_str = text[first_brace:index + 1]
-                try:
-                    return ast.literal_eval(dict_str)
-                except Exception:
-                    return default_segments
+    segments_text = _extract_yaml_block_value(text, "segments")
+    if segments_text:
+        parsed_segments = _normalize_segments(_parse_configuration_value(segments_text))
+        if parsed_segments:
+            return _with_total_segment(parsed_segments)
 
     return default_segments
+
+
+def _parse_configuration_value(text: str):
+    for parser in (yaml.safe_load, ast.literal_eval):
+        try:
+            value = parser(text)
+        except Exception:
+            continue
+        if value is not None:
+            return value
+    return None
+
+
+def _normalize_segments(value) -> dict:
+    if not isinstance(value, dict):
+        return {}
+
+    result = {}
+    for segment_name, segment_config in value.items():
+        if not segment_name:
+            continue
+
+        if segment_config is None:
+            segment_config = {}
+        if not isinstance(segment_config, dict):
+            continue
+
+        result[str(segment_name)] = segment_config
+    return result
+
+
+def _with_total_segment(segments: dict) -> dict:
+    if "Total" in segments:
+        return segments
+    return {"Total": {"pro_rights": "All"}, **segments}
+
+
+def _extract_balanced_config_value(text: str, key: str) -> str:
+    start_match = re.search(rf"\b{re.escape(key)}\s*[:=]\s*", text)
+    if not start_match:
+        return ""
+
+    start = start_match.end()
+    while start < len(text) and text[start].isspace():
+        start += 1
+
+    if start >= len(text) or text[start] not in "{[":
+        return ""
+
+    opener = text[start]
+    closer = "}" if opener == "{" else "]"
+    depth = 0
+    quote_char = ""
+    escaped = False
+
+    for index in range(start, len(text)):
+        char = text[index]
+
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = bool(quote_char)
+            continue
+        if quote_char:
+            if char == quote_char:
+                quote_char = ""
+            continue
+        if char in {"'", '"'}:
+            quote_char = char
+            continue
+        if char == opener:
+            depth += 1
+            continue
+        if char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+
+    return ""
+
+
+def _extract_yaml_block_value(text: str, key: str) -> str:
+    lines = text.splitlines()
+    for line_index, line in enumerate(lines):
+        match = re.match(rf"^(\s*){re.escape(key)}\s*:\s*$", line)
+        if not match:
+            continue
+
+        base_indent = len(match.group(1))
+        block_lines = []
+        for next_line in lines[line_index + 1:]:
+            if not next_line.strip():
+                block_lines.append(next_line)
+                continue
+
+            current_indent = len(next_line) - len(next_line.lstrip())
+            if current_indent <= base_indent:
+                break
+
+            block_lines.append(next_line)
+
+        return textwrap.dedent("\n".join(block_lines)).strip()
+
+    return ""
 
 
 def get_exps_list(domain: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:

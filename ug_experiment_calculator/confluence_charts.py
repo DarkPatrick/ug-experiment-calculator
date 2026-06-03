@@ -92,7 +92,6 @@ def build_metric_confluence_chart_code(
             title_placement=title_placement,
             image_format=image_format,
             range_axis_lower_bound=0,
-            range_axis_upper_bound=1,
             range_axis_tick_unit=0.25,
         )
     if output_format == "wiki":
@@ -105,7 +104,6 @@ def build_metric_confluence_chart_code(
             title_placement=title_placement,
             image_format=image_format,
             range_axis_lower_bound=0,
-            range_axis_upper_bound=1,
             range_axis_tick_unit=0.25,
         )
 
