@@ -249,7 +249,7 @@ js_code = get_metric_echarts_code(
 Первый график:
 
 - ось X: дата;
-- ось Y: `lift, %`;
+- ось Y: `diff, %`;
 - отдельная линия для каждой пары вариаций;
 - tooltip показывает дату, значение control-ветки, значение test-ветки, абсолютную разницу и lift.
 
@@ -346,7 +346,7 @@ chart_code = get_metric_confluence_chart_code(
 
 Нативный Chart macro поддерживает настройку цветов серий, но не дает надежного параметра для пунктирной линии, поэтому уровень значимости рисуется красной линией без dash-стиля.
 
-Lift-график строится аналогично, но берет колонку `lift` и не добавляет уровень значимости:
+График `diff, %` строится аналогично, но берет колонку `lift` и не добавляет уровень значимости:
 
 ```python
 from ug_experiment_calculator import get_metric_confluence_lift_chart_code
@@ -371,7 +371,7 @@ pvalue_chart_code = build_metric_confluence_chart_code(rows, "arpu, $")
 lift_chart_code = build_metric_confluence_lift_chart_code(rows, "arpu, $")
 ```
 
-Ожидаемые колонки `rows`: `dt`, `variation_pair`, `pvalue` для p-value chart и `lift` для lift chart. Опционально полезны `control_variation` и `test_variation`.
+Ожидаемые колонки `rows`: `dt`, `variation_pair`, `pvalue` для p-value chart и `lift` для графика `diff, %`. Опционально полезны `control_variation` и `test_variation`.
 
 ## Confluence-таблица эксперимента
 
@@ -394,7 +394,7 @@ table_code = get_experiment_confluence_table_code(
 - `Variation N` - `mean_1` для test-вариации;
 - `diff, %` - `lift`;
 - `pvalue` - `pvalue`;
-- `cumulatives` - два Confluence Chart macro друг под другом: cumulative p-value и cumulative lift по датам.
+- `cumulatives` - два Confluence Chart macro друг под другом: cumulative p-value и cumulative diff по датам.
 
 Колонки метрик берутся из `metrics.yaml`: только метрики с `table_position > 0`, порядок по `table_position`. Поле `positive` управляет раскраской p-value:
 
@@ -501,7 +501,7 @@ from ug_experiment_calculator import (
 - `build_metric_echarts_options(rows)` - вернуть два ECharts option-объекта.
 - `get_metric_confluence_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative p-value.
 - `build_metric_confluence_chart_code(rows, metric, ...)` - собрать Confluence Chart macro из готовых строк.
-- `get_metric_confluence_lift_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative lift.
+- `get_metric_confluence_lift_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative diff.
 - `build_metric_confluence_lift_chart_code(rows, metric, ...)` - собрать lift Confluence Chart macro из готовых строк.
 - `get_experiment_confluence_table_code(...)` - прочитать `ug_exp_results` и вернуть Confluence storage table по эксперименту.
 - `build_experiment_confluence_table_code(rows, metrics_yaml_path=...)` - собрать Confluence storage table из готовых строк.

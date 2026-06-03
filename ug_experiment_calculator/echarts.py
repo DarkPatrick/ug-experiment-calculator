@@ -248,7 +248,7 @@ def _build_lift_option(grouped_rows: list[tuple[str, pd.DataFrame]]) -> dict[str
         "legend": {"type": "scroll", "top": 0, "data": legend_data},
         "grid": {"left": 60, "right": 30, "top": 45, "bottom": 60, "containLabel": True},
         "xAxis": {"type": "time"},
-        "yAxis": {"type": "value", "name": "lift, %"},
+        "yAxis": {"type": "value", "name": "diff, %"},
         "series": series,
     }
 

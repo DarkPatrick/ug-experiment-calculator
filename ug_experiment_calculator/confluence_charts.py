@@ -17,7 +17,7 @@ CONFLUENCE_DATE_FORMAT = "yyyy-MM-dd"
 SIGNIFICANCE_LEVEL_SERIES_NAME = "α = 0.05"
 SIGNIFICANCE_LEVEL_COLOR = "#ff0000"
 PVALUE_CHART_SUBTITLE = "p-value"
-LIFT_CHART_SUBTITLE = "lift, %"
+DIFF_CHART_SUBTITLE = "diff, %"
 
 CONFLUENCE_CHART_BASE_COLUMNS: tuple[str, ...] = (
     "dt",
@@ -121,7 +121,7 @@ def build_metric_confluence_lift_chart_code(
     height: int = 125,
     max_x_ticks: int = 2,
     title_placement: Literal["subtitle", "title", "none"] = "subtitle",
-    title: str = LIFT_CHART_SUBTITLE,
+    title: str = DIFF_CHART_SUBTITLE,
     image_format: str = "png",
 ) -> str:
     chart_data = _prepare_chart_data(
@@ -200,7 +200,7 @@ def get_metric_confluence_lift_chart_code(
     height: int = 125,
     max_x_ticks: int = 2,
     title_placement: Literal["subtitle", "title", "none"] = "subtitle",
-    title: str = LIFT_CHART_SUBTITLE,
+    title: str = DIFF_CHART_SUBTITLE,
     image_format: str = "png",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
