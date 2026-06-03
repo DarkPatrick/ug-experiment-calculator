@@ -66,7 +66,8 @@ def build_metric_confluence_chart_code(
     height: int = 250,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
-    max_x_ticks: int = 4,
+    max_x_ticks: int = 1,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
 ) -> str:
     chart_data = _prepare_chart_data(
         rows,
@@ -83,6 +84,7 @@ def build_metric_confluence_chart_code(
             width=width,
             height=height,
             domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
         )
     if output_format == "wiki":
         return _build_wiki_chart_code(
@@ -91,6 +93,7 @@ def build_metric_confluence_chart_code(
             width=width,
             height=height,
             domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
         )
 
     raise ValueError(f"Unsupported output_format: {output_format}")
@@ -107,7 +110,8 @@ def get_metric_confluence_chart_code(
     height: int = 250,
     include_significance_level: bool = True,
     significance_level: float = 0.05,
-    max_x_ticks: int = 4,
+    max_x_ticks: int = 1,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
@@ -120,6 +124,7 @@ def get_metric_confluence_chart_code(
         include_significance_level=include_significance_level,
         significance_level=significance_level,
         max_x_ticks=max_x_ticks,
+        title_placement=title_placement,
     )
 
 
@@ -184,12 +189,14 @@ def _build_storage_chart_code(
     width: int,
     height: int,
     domain_axis_tick_unit: int,
+    title_placement: Literal["subtitle", "title", "none"],
 ) -> str:
     parameters = _chart_parameters(
         title=title,
         width=width,
         height=height,
         domain_axis_tick_unit=domain_axis_tick_unit,
+        title_placement=title_placement,
         colors=_series_colors(chart_data.series_names),
     )
 
@@ -210,12 +217,14 @@ def _build_wiki_chart_code(
     width: int,
     height: int,
     domain_axis_tick_unit: int,
+    title_placement: Literal["subtitle", "title", "none"],
 ) -> str:
     parameters = _chart_parameters(
         title=title,
         width=width,
         height=height,
         domain_axis_tick_unit=domain_axis_tick_unit,
+        title_placement=title_placement,
         colors=_series_colors(chart_data.series_names),
     )
     params_str = "|".join(f"{name}={value}" for name, value in parameters)
@@ -231,10 +240,10 @@ def _chart_parameters(
     width: int,
     height: int,
     domain_axis_tick_unit: int,
+    title_placement: Literal["subtitle", "title", "none"],
     colors: list[str],
 ) -> list[tuple[str, str | int]]:
     parameters: list[tuple[str, str | int]] = [
-        ("title", title),
         ("type", "timeSeries"),
         ("width", int(width)),
         ("height", int(height)),
@@ -253,6 +262,13 @@ def _chart_parameters(
         ("dataDisplay", "false"),
         ("imageFormat", "png"),
     ]
+    if title_placement == "title":
+        parameters.insert(0, ("title", title))
+    elif title_placement == "subtitle":
+        parameters.insert(0, ("subTitle", title))
+    elif title_placement != "none":
+        raise ValueError(f"Unsupported title_placement: {title_placement}")
+
     if colors:
         parameters.append(("colors", ",".join(colors)))
     return parameters
@@ -310,6 +326,8 @@ def _domain_axis_tick_unit(dates: list[str], *, max_x_ticks: int) -> int:
     if not dates:
         return 1
     max_ticks = max(1, int(max_x_ticks))
+    if max_ticks == 1:
+        return max(1, len(dates) + 1)
     return max(1, int(np.ceil(len(dates) / max_ticks)))
 
 

@@ -324,11 +324,24 @@ chart_code = get_metric_confluence_chart_code(
 
 - размер `250x250`;
 - тип `timeSeries`;
-- заголовок `Cumulative p-value for <metric> by date`;
+- заголовок `Cumulative p-value for <metric> by date`, по умолчанию передается как `subTitle`, чтобы Confluence рисовал его меньшим шрифтом;
 - ось X содержит даты в формате `yyyy-MM-dd`;
 - ось Y содержит `pvalue` для каждой пары вариаций;
 - легенда включена;
 - добавляется красная серия `p = 0.05` как уровень значимости.
+
+Для компактного графика `max_x_ticks` по умолчанию равен `1`, поэтому Confluence почти не рисует подписи дат на оси X. Чтобы вернуть более частые даты или обычный крупный заголовок:
+
+```python
+chart_code = get_metric_confluence_chart_code(
+    exp_id=123456,
+    metric="arpu, $",
+    client="UG_WEB",
+    segment="Total",
+    max_x_ticks=3,
+    title_placement="title",
+)
+```
 
 Нативный Chart macro поддерживает настройку цветов серий, но не дает надежного параметра для пунктирной линии, поэтому уровень значимости рисуется красной линией без dash-стиля.
 
