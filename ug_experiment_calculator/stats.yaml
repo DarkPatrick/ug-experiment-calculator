@@ -1,0 +1,98 @@
+access_cnt:
+  - type: int
+  - display_name: "Accesses"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of accesses"
+  - table_position: 1
+
+subscriptions_cnt:
+  - type: int
+  - display_name: "Subscriptions"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of subscriptions"
+  - table_position: 2
+
+subscriber_cnt:
+  - type: int
+  - display_name: "Subscribers"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of subscribers"
+  - table_position: 3
+
+access_trial_cnt:
+  - type: int
+  - display_name: "Trials"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of trial subscriptions"
+  - table_position: 4
+
+charged_trial_cnt:
+  - type: int
+  - display_name: "Charged Trials"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charged trial subscriptions"
+  - table_position: 5
+
+any_charged_trial_cnt:
+  - type: int
+  - display_name: "Any Charged Trials"
+  - platforms: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charged trial subscriptions or converted to instant offer"
+  - table_position: 6
+
+charge_cnt:
+  - type: int
+  - display_name: "Charges"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charges"
+  - table_position: 7
+
+buyer_cnt:
+  - type: int
+  - display_name: "Buyers"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of buyers"
+  - table_position: 8
+
+revenue:
+  - type: int
+  - display_name: "Revenue"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "revenue from charges"
+  - table_position: 9
+  - suffix: "$"
+
+cancel_14d_cnt:
+  - type: int
+  - display_name: "14d Cancellations"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charges cancelled within 14 days since payment date"
+  - table_position: 10
+
+refund_14d_cnt:
+  - type: int
+  - display_name: "14d Refunds"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charges who got refund within 14 days since payment date"
+  - table_position: 11
+
+pending_14d_charge_cnt:
+  - type: int
+  - display_name: "14d Pending Charges"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charges occured earlier than 14 days ago"
+  - table_position: 12
+
+active_trial_cnt:
+  - type: int
+  - display_name: "Active Trials"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of trial subscriptions started before experiment"
+  - table_position: 13
+
+active_charged_trial_cnt:
+  - type: int
+  - display_name: "Active Charged Trials"
+  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - description: "number of charged trial subscriptions started before experiment"
+  - table_position: 14

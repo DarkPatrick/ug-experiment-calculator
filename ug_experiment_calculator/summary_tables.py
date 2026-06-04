@@ -48,9 +48,15 @@ LATEST_STATS_COLUMNS: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
-class _MetricFormatConfig:
+class _SummaryItemConfig:
+    source_name: str
+    display_name: str
+    description: str
+    table_position: int
+    platforms: tuple[str, ...]
     prefix: str = ""
     suffix: str = ""
+    value_type: str = ""
     positive: bool = True
 
 
@@ -61,27 +67,31 @@ def get_latest_experiment_summary_tables(
     segments: Optional[Sequence[str]] = None,
     metrics: Optional[Sequence[str]] = None,
     metrics_yaml_path: str | Path | None = None,
+    stats_yaml_path: str | Path | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cfg = config or ExperimentCalculatorConfig.from_env()
+    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path)
     results_rows = _get_latest_results_rows(
         exp_id,
         clients=clients,
         segments=segments,
-        metrics=metrics,
+        metrics=_filtered_config_names(metric_configs, metrics),
         config=cfg,
     )
     stats_rows = _get_latest_stats_rows(
         exp_id,
         clients=clients,
         segments=segments,
-        metrics=metrics,
+        metrics=_filtered_config_names(stats_configs, metrics),
         config=cfg,
     )
     return build_latest_experiment_summary_tables(
         results_rows,
         stats_rows,
         metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
     )
 
 
@@ -90,11 +100,13 @@ def build_latest_experiment_summary_tables(
     stats_rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
     metrics_yaml_path: str | Path | None = None,
+    stats_yaml_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cfg = ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_metric_format_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path)
     results_df = _build_results_summary_table(results_rows, metric_configs)
-    stats_df = _build_stats_summary_table(stats_rows, metric_configs)
+    stats_df = _build_stats_summary_table(stats_rows, stats_configs)
     return results_df, stats_df
 
 
@@ -192,10 +204,26 @@ def _get_latest_stats_rows(
 
 def _build_results_summary_table(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
-    metric_configs: dict[str, _MetricFormatConfig],
+    metric_configs: dict[str, _SummaryItemConfig],
 ) -> pd.DataFrame:
-    df = _latest_date_rows(_prepare_rows(rows, LATEST_RESULTS_COLUMNS), ["client", "segment", "metric", "variation_pair"])
-    columns = ["client", "segment", "variation_pair", "metric", "control", "test", "diff", "diff, %", "ci_low", "ci_high", "pvalue", "color"]
+    df = _latest_date_rows(_prepare_rows(rows, LATEST_RESULTS_COLUMNS))
+    df = _filter_configured_rows(df, metric_configs)
+    df = _sort_summary_rows(df, ["variation_pair"])
+    columns = [
+        "client",
+        "segment",
+        "variation_pair",
+        "metric",
+        "description",
+        "control",
+        "test",
+        "diff",
+        "diff, %",
+        "ci_low",
+        "ci_high",
+        "pvalue",
+        "color",
+    ]
     if df.empty:
         return _empty_string_df(columns)
 
@@ -203,7 +231,14 @@ def _build_results_summary_table(
         "client": df["client"].map(_format_text),
         "segment": df["segment"].map(_format_text),
         "variation_pair": df["variation_pair"].map(_format_text),
-        "metric": df["metric"].map(_format_text),
+        "metric": [
+            _summary_config(row["metric"], metric_configs).display_name
+            for _, row in df.iterrows()
+        ],
+        "description": [
+            _summary_config(row["metric"], metric_configs).description
+            for _, row in df.iterrows()
+        ],
         "control": [
             _format_metric_column_value(row["mean_0"], row["metric"], metric_configs)
             for _, row in df.iterrows()
@@ -236,20 +271,29 @@ def _build_results_summary_table(
 
 def _build_stats_summary_table(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
-    metric_configs: dict[str, _MetricFormatConfig],
+    stats_configs: dict[str, _SummaryItemConfig],
 ) -> pd.DataFrame:
-    df = _latest_date_rows(_prepare_rows(rows, LATEST_STATS_COLUMNS), ["client", "segment", "metric", "variation"])
-    columns = ["client", "segment", "metric", "variation", "value"]
+    df = _latest_date_rows(_prepare_rows(rows, LATEST_STATS_COLUMNS))
+    df = _filter_configured_rows(df, stats_configs)
+    df = _sort_summary_rows(df, ["variation"])
+    columns = ["client", "segment", "metric", "description", "variation", "value"]
     if df.empty:
         return _empty_string_df(columns)
 
     result = pd.DataFrame({
         "client": df["client"].map(_format_text),
         "segment": df["segment"].map(_format_text),
-        "metric": df["metric"].map(_format_text),
+        "metric": [
+            _summary_config(row["metric"], stats_configs).display_name
+            for _, row in df.iterrows()
+        ],
+        "description": [
+            _summary_config(row["metric"], stats_configs).description
+            for _, row in df.iterrows()
+        ],
         "variation": df["variation"].map(_format_variation),
         "value": [
-            _format_metric_column_value(row["value"], row["metric"], metric_configs)
+            _format_metric_column_value(row["value"], row["metric"], stats_configs)
             for _, row in df.iterrows()
         ],
     })
@@ -277,36 +321,52 @@ def _prepare_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]], required_col
     return df
 
 
-def _latest_date_rows(df: pd.DataFrame, sort_columns: list[str]) -> pd.DataFrame:
+def _latest_date_rows(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     latest_dt = df["dt"].max()
-    return df[df["dt"] == latest_dt].copy().sort_values(sort_columns).reset_index(drop=True)
+    return df[df["dt"] == latest_dt].copy().reset_index(drop=True)
 
 
-def _load_metric_format_configs(metrics_yaml_path: str | Path) -> dict[str, _MetricFormatConfig]:
-    metrics_config = load_metrics_config(metrics_yaml_path)
+def _load_summary_item_configs(yaml_path: str | Path) -> dict[str, _SummaryItemConfig]:
+    raw_config = load_metrics_config(yaml_path)
     result = {}
-    for metric_name, metric_items in metrics_config.items():
-        metric_config = normalize_metric_config(metric_items)
-        result[str(metric_name)] = _MetricFormatConfig(
-            prefix=str(metric_config.get("prefix") or ""),
-            suffix=str(metric_config.get("suffix") or ""),
-            positive=bool(int(metric_config.get("positive", 1))),
+    for source_index, (item_name, item_config_items) in enumerate(raw_config.items()):
+        item_config = normalize_metric_config(item_config_items)
+        table_position = int(item_config.get("table_position") or 0)
+        if table_position <= 0:
+            continue
+
+        source_name = str(item_name)
+        result[source_name] = _SummaryItemConfig(
+            source_name=source_name,
+            display_name=str(item_config.get("display_name") or source_name),
+            description=str(item_config.get("description") or ""),
+            table_position=table_position,
+            platforms=tuple(str(platform) for platform in item_config.get("platforms", [])),
+            prefix=str(item_config.get("prefix") or ""),
+            suffix=str(item_config.get("suffix") or ""),
+            value_type=str(item_config.get("type") or ""),
+            positive=bool(int(item_config.get("positive", 1))),
         )
     return result
 
 
-def _format_metric_column_value(value: Any, metric: str, metric_configs: dict[str, _MetricFormatConfig]) -> str:
-    metric_config = metric_configs.get(str(metric), _MetricFormatConfig())
-    return format_metric_value(value, prefix=metric_config.prefix, suffix=metric_config.suffix)
+def _format_metric_column_value(value: Any, metric: str, configs: dict[str, _SummaryItemConfig]) -> str:
+    config = _summary_config(metric, configs)
+    if config.value_type == "int":
+        formatted_value = _format_int_value(value)
+        if formatted_value == "":
+            return ""
+        return f"{config.prefix}{formatted_value}{config.suffix}"
+    return format_metric_value(value, prefix=config.prefix, suffix=config.suffix)
 
 
 def _pvalue_background(
     pvalue: Any,
     diff_percent: Any,
     metric: str,
-    metric_configs: dict[str, _MetricFormatConfig],
+    metric_configs: dict[str, _SummaryItemConfig],
 ) -> str:
     pvalue_number = number_or_none(pvalue)
     diff_percent_number = number_or_none(diff_percent)
@@ -315,9 +375,55 @@ def _pvalue_background(
     if pvalue_number >= 0.05 or diff_percent_number is None or diff_percent_number == 0:
         return PVALUE_NEUTRAL_COLOR
 
-    metric_config = metric_configs.get(str(metric), _MetricFormatConfig())
+    metric_config = _summary_config(metric, metric_configs)
     is_good = diff_percent_number > 0 if metric_config.positive else diff_percent_number < 0
     return PVALUE_POSITIVE_COLOR if is_good else PVALUE_NEGATIVE_COLOR
+
+
+def _format_int_value(value: Any) -> str:
+    number_value = number_or_none(value)
+    if number_value is None:
+        return ""
+    return str(int(round(number_value)))
+
+
+def _summary_config(metric: Any, configs: dict[str, _SummaryItemConfig]) -> _SummaryItemConfig:
+    return configs[str(metric)]
+
+
+def _filter_configured_rows(df: pd.DataFrame, configs: dict[str, _SummaryItemConfig]) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    rows = []
+    for _, row in df.iterrows():
+        config = configs.get(str(row["metric"]))
+        if config is None:
+            continue
+        if config.platforms and str(row["client"]) not in config.platforms:
+            continue
+        rows.append(row)
+
+    if not rows:
+        return df.iloc[0:0].copy()
+
+    result = pd.DataFrame(rows).reset_index(drop=True)
+    result["table_position"] = result["metric"].map(lambda metric: configs[str(metric)].table_position)
+    return result
+
+
+def _sort_summary_rows(df: pd.DataFrame, extra_columns: list[str]) -> pd.DataFrame:
+    if df.empty:
+        return df
+    return df.sort_values(["client", "segment", "table_position", *extra_columns]).reset_index(drop=True)
+
+
+def _filtered_config_names(configs: dict[str, _SummaryItemConfig], names: Optional[Sequence[str]]) -> list[str]:
+    config_names = list(configs)
+    if not names:
+        return config_names
+    allowed_names = {str(name) for name in names}
+    return [name for name in config_names if name in allowed_names]
 
 
 def _format_text(value: Any) -> str:
