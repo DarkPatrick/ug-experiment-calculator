@@ -9,6 +9,12 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from .colors import (
+    HEADER_COLOR,
+    PVALUE_NEGATIVE_COLOR,
+    PVALUE_NEUTRAL_COLOR,
+    PVALUE_POSITIVE_COLOR,
+)
 from .config import ExperimentCalculatorConfig
 from .confluence_charts import (
     build_metric_confluence_chart_code,
@@ -23,10 +29,6 @@ from .value_formatting import (
 )
 
 
-HEADER_COLOR = "#eae6ff"
-PVALUE_NEUTRAL_COLOR = "#fffae6"
-PVALUE_POSITIVE_COLOR = "#e3fcef"
-PVALUE_NEGATIVE_COLOR = "#ffebe6"
 TOTAL_SEGMENT = "Total"
 
 TABLE_COLUMNS: tuple[str, ...] = (
