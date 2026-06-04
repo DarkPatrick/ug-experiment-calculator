@@ -247,7 +247,7 @@ def _build_lift_option(grouped_rows: list[tuple[str, pd.DataFrame]]) -> dict[str
         "tooltip": {"trigger": "axis"},
         "legend": {"type": "scroll", "top": 0, "data": legend_data},
         "grid": {"left": 60, "right": 30, "top": 45, "bottom": 60, "containLabel": True},
-        "xAxis": {"type": "time"},
+        "xAxis": _time_x_axis(),
         "yAxis": {"type": "value", "name": "diff, %"},
         "series": series,
     }
@@ -358,7 +358,7 @@ def _build_confidence_interval_option(grouped_rows: list[tuple[str, pd.DataFrame
         "tooltip": {"trigger": "axis"},
         "legend": {"type": "scroll", "top": 0, "data": legend_data},
         "grid": {"left": 60, "right": 30, "top": 45, "bottom": 60, "containLabel": True},
-        "xAxis": {"type": "time"},
+        "xAxis": _time_x_axis(),
         "yAxis": {"type": "value", "name": "confidence intervals"},
         "series": series,
     }
@@ -371,6 +371,18 @@ def _zero_mark_line() -> dict[str, Any]:
         "label": {"show": False},
         "lineStyle": {"color": "red", "width": 3, "type": "dashed"},
         "data": [{"yAxis": 0}],
+    }
+
+
+def _time_x_axis() -> dict[str, Any]:
+    return {
+        "type": "time",
+        "axisLabel": {
+            "rotate": 30,
+            "hideOverlap": True,
+            "showMinLabel": True,
+            "showMaxLabel": True,
+        },
     }
 
 
