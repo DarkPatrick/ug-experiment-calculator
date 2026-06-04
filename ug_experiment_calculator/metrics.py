@@ -227,39 +227,69 @@ def funnel_enabled_for_client(funnel_config: dict, client: str) -> bool:
 
 
 def calc_stats(mean_0, mean_1, var_0, var_1, len_0, len_1, alpha=None, required_power=None, pvalue=None, calc_mean=False):
-    if math.isnan(mean_0) or math.isnan(mean_1) or math.isnan(len_0) or math.isnan(len_1):
-        return {
-            "pvalue": 1,
-            "cohen_d": 0,
-            "ci": [np.array([0, 0])],
-        }
+    mean_0 = _finite_number_or_none(mean_0)
+    mean_1 = _finite_number_or_none(mean_1)
+    var_0 = _finite_number_or_none(var_0)
+    var_1 = _finite_number_or_none(var_1)
+    len_0 = _finite_number_or_none(len_0)
+    len_1 = _finite_number_or_none(len_1)
+
+    if mean_0 is None or mean_1 is None or len_0 is None or len_1 is None:
+        return _neutral_stats_result()
+    if var_0 is None or var_1 is None:
+        return _neutral_stats_result()
+    if len_0 <= 0 or len_1 <= 0:
+        return _neutral_stats_result()
+
     if alpha is None:
         alpha = 0.05
     if required_power is None:
         required_power = 0.8
 
-    std = np.sqrt(var_0 / len_0 + var_1 / len_1)
+    var_0 = max(0, var_0)
+    var_1 = max(0, var_1)
+
     mean_abs = abs(mean_1 - mean_0)
     mean = mean_1 - mean_0
-    sd = np.sqrt((var_0 * len_0 + var_1 * len_1) / (len_0 + len_1 - 2))
+    std = math.sqrt(var_0 / len_0 + var_1 / len_1)
+    sd = _pooled_standard_deviation(var_0, var_1, len_0, len_1)
+
+    if std == 0:
+        if pvalue is None:
+            pvalue = 1.0 if mean_abs == 0 else 0.0
+        else:
+            pvalue = _normalize_pvalue(pvalue)
+        return {
+            "pvalue": pvalue,
+            "cohen_d": _cohen_d(mean_abs, sd),
+            "ci": [np.array([mean, mean])],
+        }
 
     if pvalue is None:
         pvalue = scipy_stats.norm.cdf(x=0, loc=mean_abs, scale=std) * 2
     elif not calc_mean:
-        std_corrected = np.abs(special.nrdtrisd(0, pvalue / 2, mean_abs))
-        sd *= 1 + (std_corrected - std) / std
-        std = std_corrected
+        pvalue = _normalize_pvalue(pvalue)
+        if 0 < pvalue < 1:
+            std_corrected = _finite_number_or_none(np.abs(special.nrdtrisd(0, pvalue / 2, mean_abs)))
+            if std_corrected is not None and std_corrected > 0:
+                if sd is not None:
+                    sd *= 1 + (std_corrected - std) / std
+                std = std_corrected
     else:
-        mean_abs = special.nrdtrimn(pvalue / 2, std, 0)
-        mean = mean_abs
-        if mean_0 > mean_1:
-            mean *= -1
+        pvalue = _normalize_pvalue(pvalue)
+        if 0 < pvalue < 1:
+            inferred_mean_abs = _finite_number_or_none(special.nrdtrimn(pvalue / 2, std, 0))
+            if inferred_mean_abs is not None:
+                mean_abs = inferred_mean_abs
+                mean = mean_abs
+                if mean_0 > mean_1:
+                    mean *= -1
 
-    cohen_d = mean_abs / sd
+    pvalue = _normalize_pvalue(pvalue)
 
     return {
         "pvalue": pvalue,
-        "cohen_d": cohen_d,
+        "cohen_d": _cohen_d(mean_abs, sd),
         "ci": [
             np.array([
                 scipy_stats.norm.ppf(alpha / 2, mean, std),
@@ -267,6 +297,50 @@ def calc_stats(mean_0, mean_1, var_0, var_1, len_0, len_1, alpha=None, required_
             ])
         ],
     }
+
+
+def _neutral_stats_result() -> dict:
+    return {
+        "pvalue": 1,
+        "cohen_d": 0,
+        "ci": [np.array([0, 0])],
+    }
+
+
+def _finite_number_or_none(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        number_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number_value):
+        return None
+    return number_value
+
+
+def _pooled_standard_deviation(var_0: float, var_1: float, len_0: float, len_1: float) -> float | None:
+    denominator = len_0 + len_1 - 2
+    if denominator <= 0:
+        return None
+
+    value = (var_0 * len_0 + var_1 * len_1) / denominator
+    if value <= 0:
+        return 0
+    return math.sqrt(value)
+
+
+def _cohen_d(mean_abs: float, sd: float | None) -> float:
+    if sd is None or sd <= 0:
+        return 0
+    return mean_abs / sd
+
+
+def _normalize_pvalue(value) -> float:
+    pvalue = _finite_number_or_none(value)
+    if pvalue is None:
+        return 1
+    return min(1, max(0, pvalue))
 
 
 def safe_divide(numerator, denominator):
