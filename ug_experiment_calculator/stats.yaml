@@ -60,7 +60,7 @@ revenue:
   - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - description: "revenue from charges"
   - table_position: 9
-  - suffix: "$"
+  - prefix: "$"
 
 cancel_14d_cnt:
   - type: int
