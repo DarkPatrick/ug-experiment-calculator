@@ -15,6 +15,7 @@ from .colors import (
 from .config import ExperimentCalculatorConfig
 from .metrics import load_metrics_config, normalize_metric_config
 from .value_formatting import (
+    apply_number_affixes,
     format_diff_percent,
     format_metric_value,
     format_pvalue,
@@ -358,7 +359,7 @@ def _format_metric_column_value(value: Any, metric: str, configs: dict[str, _Sum
         formatted_value = _format_int_value(value)
         if formatted_value == "":
             return ""
-        return f"{config.prefix}{formatted_value}{config.suffix}"
+        return apply_number_affixes(formatted_value, prefix=config.prefix, suffix=config.suffix)
     return format_metric_value(value, prefix=config.prefix, suffix=config.suffix)
 
 

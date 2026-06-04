@@ -546,6 +546,7 @@ from ug_experiment_calculator import (
 
 ```python
 from ug_experiment_calculator import (
+    apply_number_affixes,
     format_diff_percent,
     format_metric_number,
     format_metric_value,
@@ -556,6 +557,7 @@ from ug_experiment_calculator import (
 
 - `format_metric_number(value)` - округлить число для табличного отображения без экспоненциальной записи.
 - `format_metric_value(value, prefix="$", suffix="%")` - добавить префикс/суффикс к отформатированному значению.
+- `apply_number_affixes(value, prefix="$", suffix="%")` - добавить префикс/суффикс к готовой числовой строке, сохраняя знак перед префиксом.
 - `format_diff_percent(value)` - отформатировать lift/diff и добавить `%`.
 - `format_pvalue(value)` - отформатировать p-value по правилам Confluence-таблицы.
 - `format_plain_number(value)` - вывести число без экспоненциальной записи и без табличного округления.

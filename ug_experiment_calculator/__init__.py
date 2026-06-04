@@ -39,6 +39,7 @@ from .metrics import (
     safe_divide,
 )
 from .value_formatting import (
+    apply_number_affixes,
     format_diff_percent,
     format_metric_number,
     format_metric_value,
@@ -80,6 +81,7 @@ __all__ = [
     "PVALUE_NEGATIVE_COLOR",
     "PVALUE_NEUTRAL_COLOR",
     "PVALUE_POSITIVE_COLOR",
+    "apply_number_affixes",
     "build_experiment_confluence_table_code",
     "build_latest_experiment_summary_tables",
     "build_metric_confluence_chart_code",

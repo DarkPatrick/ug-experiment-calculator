@@ -42,7 +42,7 @@ def format_metric_value(value: Any, *, prefix: str | None = None, suffix: str | 
     formatted_value = format_metric_number(value)
     if formatted_value == "":
         return ""
-    return f"{prefix or ''}{formatted_value}{suffix or ''}"
+    return apply_number_affixes(formatted_value, prefix=prefix, suffix=suffix)
 
 
 def format_diff_percent(value: Any) -> str:
@@ -74,6 +74,15 @@ def format_plain_number(value: Any, *, default: str = "") -> str:
     if "." in formatted_value:
         formatted_value = formatted_value.rstrip("0").rstrip(".")
     return formatted_value or "0"
+
+
+def apply_number_affixes(value: str, *, prefix: str | None = None, suffix: str | None = None) -> str:
+    value = str(value)
+    sign = ""
+    if value.startswith("-"):
+        sign = "-"
+        value = value[1:]
+    return f"{sign}{prefix or ''}{value}{suffix or ''}"
 
 
 def _fractional_leading_zeros(abs_value: float) -> int:
