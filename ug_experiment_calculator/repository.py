@@ -430,6 +430,7 @@ def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -
         "configuration": df.configuration[0],
         "clients_list": df.clients_list[0],
         "clients_options": df.clients_options[0],
+        "name": df.name[0],
     }
     exp_info["project"] = parse_configuration_project(exp_info["configuration"])
     exp_info["segments"] = parse_configuration_segments(exp_info["configuration"])
