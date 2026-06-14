@@ -5,10 +5,10 @@ description = "Experiment monetization metrics calculator backed by ClickHouse"
 requires-python = ">=3.13"
 dependencies = [
     "clickhouse-worker @ git+https://github.com/DarkPatrick/clickhouse-worker.git@main",
-    "numpy>=2.4.4",
-    "pandas>=3.0.2",
-    "PyYAML>=6.0.3",
-    "scipy>=1.17.1",
+    "numpy>=2.1",
+    "pandas>=2.2.3",
+    "PyYAML>=6.0.2",
+    "scipy>=1.14.1",
 ]
 
 [build-system]
