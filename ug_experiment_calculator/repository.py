@@ -29,7 +29,7 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 3
+SUBSCRIPTION_SOURCE_VERSION = 5
 
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
