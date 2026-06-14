@@ -29,6 +29,7 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
+SUBSCRIPTION_SOURCE_VERSION = 2
 
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
@@ -682,6 +683,33 @@ def _ensure_next_subscribed_dt_column(table_name: str, *, config: Optional[Exper
     return True
 
 
+def _ensure_source_version_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "source_version"):
+        return False
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `source_version` UInt16 default toUInt16(0) after `updated_at`
+    """
+    execute_sql_modify(query)
+    return True
+
+
+def _has_stale_source_version(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    if not _table_has_column(table_name, "source_version"):
+        return True
+
+    query = f"""
+        select 1 as `has_stale_source_version`
+        from {table_name}
+        where `source_version` != toUInt16({SUBSCRIPTION_SOURCE_VERSION})
+        limit 1
+    """
+    return not execute_sql(query).empty
+
+
 def _create_table_from_select(
     table_name: str,
     query_name: str,
@@ -731,6 +759,8 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
     else:
         _ensure_updated_at_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
+        needs_full_refresh = _ensure_source_version_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
+        needs_full_refresh = _has_stale_source_version(cfg.subscriptions_table, config=cfg) or needs_full_refresh
 
     is_transactions_exists = execute_sql(f"exists {cfg.subscription_transactions_table}")
     if int(is_transactions_exists.iloc[0].values[0]) == 0:
@@ -748,6 +778,8 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         )
     else:
         _ensure_updated_at_column(cfg.subscription_transactions_table, config=cfg)
+        needs_full_refresh = _ensure_source_version_column(cfg.subscription_transactions_table, config=cfg) or needs_full_refresh
+        needs_full_refresh = _has_stale_source_version(cfg.subscription_transactions_table, config=cfg) or needs_full_refresh
 
     return needs_full_refresh
 

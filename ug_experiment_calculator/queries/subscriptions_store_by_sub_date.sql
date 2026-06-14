@@ -18,7 +18,8 @@ select
     `service_name`,
     `duration_count`,
     `is_otp`,
-    now() as `updated_at`
+    now() as `updated_at`,
+    toUInt16(2) as `source_version`
 from (
     select
         `subscription_id`,
