@@ -48,7 +48,15 @@ from (
             end,
             `use`.`datetime`, `use`.`event` = 'Subscribed'
         ) as `first_charge_expected_dt`,
-        argMinIf(`use`.`trial`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `trial`,
+        if(
+            argMinIf(`use`.`trial`, `use`.`datetime`, `use`.`event` = 'Subscribed') > 0
+            or (
+                toDate(`first_charge_expected_dt`) > toDate(`subscribed_dt`)
+                and toDate(`charge_dt`) != toDate(`subscribed_dt`)
+            ),
+            1,
+            0
+        ) as `trial`,
         argMinIf(`use`.`funnel_source`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `funnel_source`,
         argMinIf(`use`.`product_id`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `product_id`,
         argMinIf(`use`.`user_id`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `user_id`,
