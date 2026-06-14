@@ -668,6 +668,20 @@ def _ensure_updated_at_column(table_name: str, *, config: Optional[ExperimentCal
     execute_sql_modify(query)
 
 
+def _ensure_next_subscribed_dt_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "next_subscribed_dt"):
+        return False
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `next_subscribed_dt` UInt32 default toUInt32(4102444800) after `subscribed_dt`
+    """
+    execute_sql_modify(query)
+    return True
+
+
 def _create_table_from_select(
     table_name: str,
     query_name: str,
@@ -697,8 +711,9 @@ def _delete_subscriptions_block(table_name: str, block_start: datetime.date, blo
     execute_sql_modify(query)
 
 
-def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
+    needs_full_refresh = False
 
     is_subscriptions_exists = execute_sql(f"exists {cfg.subscriptions_table}")
     if int(is_subscriptions_exists.iloc[0].values[0]) == 0:
@@ -715,6 +730,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         )
     else:
         _ensure_updated_at_column(cfg.subscriptions_table, config=cfg)
+        needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
 
     is_transactions_exists = execute_sql(f"exists {cfg.subscription_transactions_table}")
     if int(is_transactions_exists.iloc[0].values[0]) == 0:
@@ -733,22 +749,25 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
     else:
         _ensure_updated_at_column(cfg.subscription_transactions_table, config=cfg)
 
+    return needs_full_refresh
+
 
 def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     cfg = get_config(config)
-    _ensure_subscription_source_tables(config=cfg)
+    needs_full_refresh = _ensure_subscription_source_tables(config=cfg)
 
     subscriptions_max_dt = _get_table_max_subscribed_date(cfg.subscriptions_table, config=cfg)
     transactions_max_dt = _get_table_max_subscribed_date(cfg.subscription_transactions_table, config=cfg)
     dates = [dt for dt in [subscriptions_max_dt, transactions_max_dt] if dt is not None]
-    date_start = min(dates) if dates else cfg.subscriptions_start_date
+    date_start = cfg.subscriptions_start_date if needs_full_refresh else min(dates) if dates else cfg.subscriptions_start_date
     date_end = datetime.datetime.now(datetime.timezone.utc).date()
 
     if date_start > date_end:
         return
 
     if (
-        date_start == date_end
+        not needs_full_refresh
+        and date_start == date_end
         and _was_subscription_day_updated_recently(cfg.subscriptions_table, date_start)
         and _was_subscription_day_updated_recently(cfg.subscription_transactions_table, date_start)
     ):

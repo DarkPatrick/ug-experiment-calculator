@@ -39,7 +39,15 @@ from (
         ifNull(`trx`.`upgrade_dt`, 0) as `upgrade_dt`,
         `use`.`platform` as `platform`,
         `use`.`first_charge_expected_dt` as `first_charge_expected_dt`,
-        `use`.`trial` as `trial`,
+        if(
+            `use`.`trial` > 0
+            or (
+                toDate(`use`.`first_charge_expected_dt`) > toDate(`use`.`subscribed_dt`)
+                and toDate(ifNull(`trx`.`charge_dt`, 0)) != toDate(`use`.`subscribed_dt`)
+            ),
+            1,
+            0
+        ) as `trial`,
         `use`.`funnel_source` as `funnel_source`,
         `use`.`product_id` as `product_id`,
         `use`.`user_id` as `user_id`,
@@ -61,6 +69,8 @@ from (
         `use`.`subscription_id` = `trx`.`subscription_id`
     and
         `use`.`product_code` = `trx`.`product_code`
+    and
+        toDate(`use`.`subscribed_dt`) = toDate(`trx`.`subscribed_dt`)
     where
         toDate(`use`.`subscribed_dt`) between date_start - interval 15 day and date_end
     and
