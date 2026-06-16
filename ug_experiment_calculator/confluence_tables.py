@@ -403,15 +403,16 @@ def _prepare_design_platform_block(
             background=HEADER_COLOR,
             bold=True,
             colspan=value_count + int(include_row_names),
-            align="left",
+            align="center",
         )
     ])
 
     for row_index, row_name in enumerate(DESIGN_TABLE_COLUMNS):
         cells = [_row_header_cell(row_name)] if include_row_names else []
         cells.extend(
-            _cell(
+            _design_value_cell(
                 value,
+                row_name,
                 background=HEADER_COLOR if row_index == 0 else None,
                 bold=row_index == 0,
                 italic=row_index != 0,
@@ -458,6 +459,7 @@ def _design_values_by_row(
     thousands_separator: bool,
 ) -> dict[str, list[str]]:
     result = {}
+    metric_values = _design_column_values(df, source_columns, "Metrics")
     for column_index, row_name in enumerate(DESIGN_TABLE_COLUMNS):
         if column_index >= len(source_columns):
             result[row_name] = [""] * len(df.index)
@@ -468,27 +470,105 @@ def _design_values_by_row(
             _format_design_table_value(
                 value,
                 row_name,
+                metric=metric_values[row_index] if row_index < len(metric_values) else "",
                 thousands_separator=thousands_separator,
             )
-            for value in df[source_column].tolist()
+            for row_index, value in enumerate(df[source_column].tolist())
         ]
     return result
 
 
-def _format_design_table_value(value: Any, row_name: str, *, thousands_separator: bool) -> str:
+def _design_column_values(df: pd.DataFrame, source_columns: list[Any], row_name: str) -> list[Any]:
+    column_index = DESIGN_TABLE_COLUMNS.index(row_name)
+    if column_index >= len(source_columns):
+        return []
+    return df[source_columns[column_index]].tolist()
+
+
+def _format_design_table_value(
+    value: Any,
+    row_name: str,
+    *,
+    metric: Any,
+    thousands_separator: bool,
+) -> str:
     if row_name in {"Metrics", "Design / each metric"}:
         return _format_text(value)
 
+    if row_name == "Baseline":
+        return _format_design_baseline(value, metric=metric, thousands_separator=thousands_separator)
     if row_name == "Lift, %":
         formatted_value = _format_diff_percent(value, thousands_separator=thousands_separator)
         return formatted_value or _format_text(value)
     if row_name == "Alpha":
         formatted_value = _format_pvalue(value, thousands_separator=thousands_separator)
         return formatted_value or _format_text(value)
+    if row_name in {"Sample size (per variation)", "Duration (days)"}:
+        return _format_design_integer(value, thousands_separator=thousands_separator)
 
     formatted_value = format_metric_number(value)
     if formatted_value == "":
         return _format_text(value)
+    if thousands_separator:
+        formatted_value = _add_thousands_separator(formatted_value)
+    return formatted_value
+
+
+def _format_design_baseline(value: Any, *, metric: Any, thousands_separator: bool) -> str:
+    formatted_value = format_metric_number(value)
+    if formatted_value == "":
+        return _format_text(value)
+    if thousands_separator:
+        formatted_value = _add_thousands_separator(formatted_value)
+
+    prefix, suffix = _design_baseline_affixes(metric)
+    return apply_number_affixes(formatted_value, prefix=prefix, suffix=suffix)
+
+
+def _design_baseline_affixes(metric: Any) -> tuple[str, str]:
+    metric_text = _format_text(metric)
+    if ", %" in metric_text:
+        return "", "%"
+    if ", $" in metric_text:
+        return "$", ""
+    return "", ""
+
+
+def _design_value_cell(
+    value: str,
+    row_name: str,
+    *,
+    background: str | None,
+    bold: bool,
+    italic: bool,
+    align: str,
+) -> str:
+    if row_name == "Design / each metric":
+        return _cell(
+            _format_raw_design_link(value),
+            background=background,
+            bold=bold,
+            italic=italic,
+            raw=True,
+            align=align,
+        )
+
+    return _cell(value, background=background, bold=bold, italic=italic, align=align)
+
+
+def _format_raw_design_link(value: str) -> str:
+    value = str(value)
+    if value.startswith("<p>") or value.startswith("<ac:"):
+        return value
+    return f"<p>{value}</p>"
+
+
+def _format_design_integer(value: Any, *, thousands_separator: bool) -> str:
+    number_value = number_or_none(value)
+    if number_value is None:
+        return _format_text(value)
+
+    formatted_value = str(int(round(number_value)))
     if thousands_separator:
         formatted_value = _add_thousands_separator(formatted_value)
     return formatted_value
@@ -767,7 +847,13 @@ def _cell(
     raw: bool = False,
     align: str = "right",
 ) -> str:
-    attributes = _cell_attributes(background=background, colspan=colspan, rowspan=rowspan, align=align)
+    attributes = _cell_attributes(
+        background=background,
+        colspan=colspan,
+        rowspan=rowspan,
+        align=align,
+        italic=raw and italic,
+    )
 
     if raw:
         return f"<td{attributes}>{value}</td>"
@@ -786,6 +872,7 @@ def _cell_attributes(
     colspan: int | None,
     rowspan: int | None,
     align: str,
+    italic: bool,
 ) -> str:
     attributes = []
     if background:
@@ -793,8 +880,13 @@ def _cell_attributes(
         attributes.append(f'class="highlight-{escaped_background} confluenceTd"')
         attributes.append(f'data-highlight-colour="{escaped_background}"')
         attributes.append(f'bgcolor="{escaped_background}"')
+    styles = []
     if align:
-        attributes.append(f'style="text-align:{escape(align)}"')
+        styles.append(f"text-align:{escape(align)}")
+    if italic:
+        styles.append("font-style:italic")
+    if styles:
+        attributes.append(f'style="{";".join(styles)}"')
     if colspan is not None:
         attributes.append(f'colspan="{int(colspan)}"')
     if rowspan is not None:
