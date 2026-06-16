@@ -385,6 +385,7 @@ from ug_experiment_calculator import get_experiment_confluence_table_code
 
 table_code = get_experiment_confluence_table_code(
     exp_id=123456,
+    thousands_separator=True,
 )
 ```
 
@@ -413,6 +414,7 @@ table_code = get_experiment_confluence_table_code(
 - `diff, %` всегда выводится с суффиксом `%`;
 - `pvalue >= 0.05` округляется до 2 знаков после точки, `pvalue < 0.05` - до 3 знаков;
 - значения метрик и `diff, %` не используют экспоненциальную запись: `abs(value) >= 1` округляется до 2 знаков после точки, а `abs(value) < 1` - до первых двух ненулевых цифр, если перед ними не больше 5 нулей; иначе выводится `0.00`.
+- по умолчанию целая часть числовых значений разделяется запятой по тысячам: `1234` -> `1,234`, `12345.6789` -> `12,345.6789`; чтобы вернуть прежний вид, передайте `thousands_separator=False`.
 
 Из готовых строк:
 
@@ -422,10 +424,28 @@ from ug_experiment_calculator import build_experiment_confluence_table_code
 table_code = build_experiment_confluence_table_code(
     rows,
     metrics_yaml_path="ug_experiment_calculator/metrics.yaml",
+    thousands_separator=True,
 )
 ```
 
 Ожидаемые колонки `rows`: `dt`, `metric`, `variation_pair`, `mean_0`, `mean_1`, `lift`, `pvalue`, `client`, `segment`. Опционально полезны `control_variation` и `test_variation`.
+
+## Confluence-таблица дизайна эксперимента
+
+```python
+from ug_experiment_calculator import build_design_confluence_table_code
+
+table_code = build_design_confluence_table_code({
+    "UGT_IOS": ios_design_df,
+    "UGT_ANDROID": android_design_df,
+    "UG_WEB": web_design_df,
+})
+```
+
+На вход передается словарь `platform -> pandas.DataFrame`. В каждом датафрейме ожидаются колонки:
+`Metrics`, `Design / each metric`, `Baseline`, `Lift, %`, `MDE`, `Power`, `Alpha`, `Sample size (per variation)`, `Duration (days)`.
+
+Если имена колонок совпадают полностью, значения берутся по этим именам в указанном порядке. Если в именах есть опечатки или лишние символы, значения берутся в текущем порядке колонок датафрейма, а названия строк все равно выводятся из фиксированного списка выше. Блоки платформ идут горизонтально и разделяются фиолетовой объединенной колонкой.
 
 ## Latest summary DataFrame
 
@@ -516,6 +536,7 @@ from ug_experiment_calculator import (
 
 ```python
 from ug_experiment_calculator import (
+    build_design_confluence_table_code,
     build_experiment_confluence_table_code,
     build_latest_experiment_summary_tables,
     build_metric_confluence_chart_code,
@@ -539,6 +560,7 @@ from ug_experiment_calculator import (
 - `build_metric_confluence_lift_chart_code(rows, metric, ...)` - собрать lift Confluence Chart macro из готовых строк.
 - `get_experiment_confluence_table_code(...)` - прочитать `ug_exp_results` и вернуть Confluence storage table по эксперименту.
 - `build_experiment_confluence_table_code(rows, metrics_yaml_path=...)` - собрать Confluence storage table из готовых строк.
+- `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
 - `get_latest_experiment_summary_tables(...)` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
 - `build_latest_experiment_summary_tables(results_rows, stats_rows, ...)` - собрать latest summary DataFrame из готовых строк.
 

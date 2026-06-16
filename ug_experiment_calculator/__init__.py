@@ -9,6 +9,7 @@ _EXPORTS = {
     "PVALUE_POSITIVE_COLOR": ("colors", "PVALUE_POSITIVE_COLOR"),
     "apply_number_affixes": ("value_formatting", "apply_number_affixes"),
     "build_experiment_confluence_table_code": ("confluence_tables", "build_experiment_confluence_table_code"),
+    "build_design_confluence_table_code": ("confluence_tables", "build_design_confluence_table_code"),
     "build_latest_experiment_summary_tables": ("summary_tables", "build_latest_experiment_summary_tables"),
     "build_metric_confluence_chart_code": ("confluence_charts", "build_metric_confluence_chart_code"),
     "build_metric_confluence_lift_chart_code": ("confluence_charts", "build_metric_confluence_lift_chart_code"),

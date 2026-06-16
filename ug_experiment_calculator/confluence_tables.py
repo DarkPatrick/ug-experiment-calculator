@@ -22,8 +22,9 @@ from .confluence_charts import (
 )
 from .metrics import load_metrics_config, normalize_metric_config
 from .value_formatting import (
+    apply_number_affixes,
     format_diff_percent,
-    format_metric_value,
+    format_metric_number,
     format_pvalue,
     number_or_none,
 )
@@ -42,6 +43,23 @@ TABLE_COLUMNS: tuple[str, ...] = (
     "client",
     "segment",
 )
+
+DESIGN_TABLE_COLUMNS: tuple[str, ...] = (
+    "Metrics",
+    "Design / each metric",
+    "Baseline",
+    "Lift, %",
+    "MDE",
+    "Power",
+    "Alpha",
+    "Sample size (per variation)",
+    "Duration (days)",
+)
+
+DESIGN_SUMMARY_ROW = "Design summary"
+DESIGN_SAMPLE_ROW = "Sample"
+DESIGN_DAYS_ROW = "Days"
+DESIGN_SEPARATOR = "—"
 
 
 @dataclass(frozen=True)
@@ -106,6 +124,7 @@ def get_experiment_confluence_table_code(
     segments: Optional[Sequence[str]] = None,
     metrics_yaml_path: str | Path | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
+    thousands_separator: bool = True,
 ) -> str:
     cfg = config or ExperimentCalculatorConfig.from_env()
     metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path)
@@ -119,6 +138,7 @@ def get_experiment_confluence_table_code(
     return build_experiment_confluence_table_code(
         rows,
         metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        thousands_separator=thousands_separator,
     )
 
 
@@ -126,6 +146,7 @@ def build_experiment_confluence_table_code(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
     metrics_yaml_path: str | Path | None = None,
+    thousands_separator: bool = True,
 ) -> str:
     df = _prepare_table_rows(rows)
     cfg = ExperimentCalculatorConfig.from_env()
@@ -138,7 +159,11 @@ def build_experiment_confluence_table_code(
     client_blocks = []
     for client in client_names:
         client_df = df[df["client"] == client].copy()
-        table_html = _build_client_table(client_df, metric_configs)
+        table_html = _build_client_table(
+            client_df,
+            metric_configs,
+            thousands_separator=thousands_separator,
+        )
         if not table_html:
             continue
         if len(client_names) > 1:
@@ -149,7 +174,43 @@ def build_experiment_confluence_table_code(
     return "\n".join(client_blocks)
 
 
-def _build_client_table(df: pd.DataFrame, metric_configs: list[_MetricTableConfig]) -> str:
+def build_design_confluence_table_code(
+    platform_frames: Mapping[str, pd.DataFrame],
+    *,
+    thousands_separator: bool = True,
+) -> str:
+    blocks = []
+    for platform_index, (platform, df) in enumerate(platform_frames.items()):
+        blocks.append(
+            _prepare_design_platform_block(
+                str(platform),
+                df,
+                include_row_names=platform_index == 0,
+                thousands_separator=thousands_separator,
+            )
+        )
+    if not blocks:
+        return _table([])
+
+    table_height = len(DESIGN_TABLE_COLUMNS) + 4
+    rows = []
+    for row_index in range(table_height):
+        cells = []
+        for block_index, block in enumerate(blocks):
+            if block_index > 0 and row_index == 0:
+                cells.append(_design_separator_cell(table_height))
+            cells.extend(block[row_index])
+        rows.append(_row(cells))
+
+    return _table(rows)
+
+
+def _build_client_table(
+    df: pd.DataFrame,
+    metric_configs: list[_MetricTableConfig],
+    *,
+    thousands_separator: bool,
+) -> str:
     metric_names = set(df["metric"])
     metric_configs = [metric_config for metric_config in metric_configs if metric_config.name in metric_names]
     if not metric_configs:
@@ -161,21 +222,53 @@ def _build_client_table(df: pd.DataFrame, metric_configs: list[_MetricTableConfi
         segment_df = df[df["segment"] == segment].copy()
         if segment_index > 0 or segment != TOTAL_SEGMENT:
             rows.append(_segment_row(str(segment), len(metric_configs) + 1))
-        rows.extend(_build_segment_rows(segment_df, metric_configs))
+        rows.extend(
+            _build_segment_rows(
+                segment_df,
+                metric_configs,
+                thousands_separator=thousands_separator,
+            )
+        )
     return _table(rows)
 
 
-def _build_segment_rows(df: pd.DataFrame, metric_configs: list[_MetricTableConfig]) -> list[str]:
+def _build_segment_rows(
+    df: pd.DataFrame,
+    metric_configs: list[_MetricTableConfig],
+    *,
+    thousands_separator: bool,
+) -> list[str]:
     latest_df = _latest_rows(df)
     test_variations = _test_variations(latest_df)
 
     rows = [_header_row(metric_configs)]
-    rows.append(_control_row(latest_df, metric_configs))
+    rows.append(_control_row(latest_df, metric_configs, thousands_separator=thousands_separator))
 
     for test_variation in test_variations:
-        rows.append(_test_variation_row(latest_df, metric_configs, test_variation))
-        rows.append(_lift_row(latest_df, metric_configs, test_variation))
-        rows.append(_pvalue_row(latest_df, metric_configs, test_variation))
+        rows.append(
+            _test_variation_row(
+                latest_df,
+                metric_configs,
+                test_variation,
+                thousands_separator=thousands_separator,
+            )
+        )
+        rows.append(
+            _lift_row(
+                latest_df,
+                metric_configs,
+                test_variation,
+                thousands_separator=thousands_separator,
+            )
+        )
+        rows.append(
+            _pvalue_row(
+                latest_df,
+                metric_configs,
+                test_variation,
+                thousands_separator=thousands_separator,
+            )
+        )
 
     rows.append(_cumulatives_row(df, metric_configs))
     return rows
@@ -190,11 +283,24 @@ def _header_row(metric_configs: list[_MetricTableConfig]) -> str:
     return _row(cells)
 
 
-def _control_row(df: pd.DataFrame, metric_configs: list[_MetricTableConfig]) -> str:
+def _control_row(
+    df: pd.DataFrame,
+    metric_configs: list[_MetricTableConfig],
+    *,
+    thousands_separator: bool,
+) -> str:
     cells = [_row_header_cell("Control")]
     for metric_config in metric_configs:
         metric_rows = df[df["metric"] == metric_config.name]
-        cells.append(_cell(_format_metric_table_value(_first_number(metric_rows, "mean_0"), metric_config)))
+        cells.append(
+            _cell(
+                _format_metric_table_value(
+                    _first_number(metric_rows, "mean_0"),
+                    metric_config,
+                    thousands_separator=thousands_separator,
+                )
+            )
+        )
     return _row(cells)
 
 
@@ -202,11 +308,21 @@ def _test_variation_row(
     df: pd.DataFrame,
     metric_configs: list[_MetricTableConfig],
     test_variation: Any,
+    *,
+    thousands_separator: bool,
 ) -> str:
     cells = [_row_header_cell(f"Variation {_format_variation(test_variation)}")]
     for metric_config in metric_configs:
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
-        cells.append(_cell(_format_metric_table_value(_row_number(row, "mean_1"), metric_config)))
+        cells.append(
+            _cell(
+                _format_metric_table_value(
+                    _row_number(row, "mean_1"),
+                    metric_config,
+                    thousands_separator=thousands_separator,
+                )
+            )
+        )
     return _row(cells)
 
 
@@ -214,11 +330,20 @@ def _lift_row(
     df: pd.DataFrame,
     metric_configs: list[_MetricTableConfig],
     test_variation: Any,
+    *,
+    thousands_separator: bool,
 ) -> str:
     cells = [_row_header_cell("diff, %")]
     for metric_config in metric_configs:
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
-        cells.append(_cell(format_diff_percent(_row_number(row, "lift"))))
+        cells.append(
+            _cell(
+                _format_diff_percent(
+                    _row_number(row, "lift"),
+                    thousands_separator=thousands_separator,
+                )
+            )
+        )
     return _row(cells)
 
 
@@ -226,13 +351,20 @@ def _pvalue_row(
     df: pd.DataFrame,
     metric_configs: list[_MetricTableConfig],
     test_variation: Any,
+    *,
+    thousands_separator: bool,
 ) -> str:
     cells = [_row_header_cell("pvalue")]
     for metric_config in metric_configs:
         row = _latest_metric_pair_row(df, metric_config.name, test_variation)
         pvalue = _row_number(row, "pvalue")
         lift = _row_number(row, "lift")
-        cells.append(_cell(format_pvalue(pvalue), background=_pvalue_background(pvalue, lift, metric_config.positive)))
+        cells.append(
+            _cell(
+                _format_pvalue(pvalue, thousands_separator=thousands_separator),
+                background=_pvalue_background(pvalue, lift, metric_config.positive),
+            )
+        )
     return _row(cells)
 
 
@@ -250,6 +382,159 @@ def _cumulatives_row(df: pd.DataFrame, metric_configs: list[_MetricTableConfig])
         ])
         cells.append(_cell(chart_code, raw=True))
     return _row(cells)
+
+
+def _prepare_design_platform_block(
+    platform: str,
+    df: pd.DataFrame,
+    *,
+    include_row_names: bool,
+    thousands_separator: bool,
+) -> list[list[str]]:
+    prepared_df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame(df)
+    source_columns = _design_source_columns(prepared_df)
+    values_by_row = _design_values_by_row(prepared_df, source_columns, thousands_separator=thousands_separator)
+    value_count = max(len(prepared_df.index), 1)
+
+    rows = []
+    rows.append([
+        _cell(
+            platform,
+            background=HEADER_COLOR,
+            bold=True,
+            colspan=value_count + int(include_row_names),
+            align="left",
+        )
+    ])
+
+    for row_index, row_name in enumerate(DESIGN_TABLE_COLUMNS):
+        cells = [_row_header_cell(row_name)] if include_row_names else []
+        cells.extend(
+            _cell(
+                value,
+                background=HEADER_COLOR if row_index == 0 else None,
+                bold=row_index == 0,
+                italic=row_index != 0,
+                align="left" if row_index == 0 else "right",
+            )
+            for value in _pad_design_values(values_by_row[row_name], value_count)
+        )
+        rows.append(cells)
+
+    rows.append([
+        _cell(
+            DESIGN_SUMMARY_ROW,
+            background=HEADER_COLOR,
+            bold=True,
+            colspan=value_count + int(include_row_names),
+            align="left",
+        )
+    ])
+    rows.append(_design_summary_value_row(
+        DESIGN_SAMPLE_ROW,
+        values_by_row["Sample size (per variation)"],
+        value_count,
+        include_row_name=include_row_names,
+    ))
+    rows.append(_design_summary_value_row(
+        DESIGN_DAYS_ROW,
+        values_by_row["Duration (days)"],
+        value_count,
+        include_row_name=include_row_names,
+    ))
+    return rows
+
+
+def _design_source_columns(df: pd.DataFrame) -> list[Any]:
+    if all(column in df.columns for column in DESIGN_TABLE_COLUMNS):
+        return list(DESIGN_TABLE_COLUMNS)
+    return list(df.columns[:len(DESIGN_TABLE_COLUMNS)])
+
+
+def _design_values_by_row(
+    df: pd.DataFrame,
+    source_columns: list[Any],
+    *,
+    thousands_separator: bool,
+) -> dict[str, list[str]]:
+    result = {}
+    for column_index, row_name in enumerate(DESIGN_TABLE_COLUMNS):
+        if column_index >= len(source_columns):
+            result[row_name] = [""] * len(df.index)
+            continue
+
+        source_column = source_columns[column_index]
+        result[row_name] = [
+            _format_design_table_value(
+                value,
+                row_name,
+                thousands_separator=thousands_separator,
+            )
+            for value in df[source_column].tolist()
+        ]
+    return result
+
+
+def _format_design_table_value(value: Any, row_name: str, *, thousands_separator: bool) -> str:
+    if row_name in {"Metrics", "Design / each metric"}:
+        return _format_text(value)
+
+    if row_name == "Lift, %":
+        formatted_value = _format_diff_percent(value, thousands_separator=thousands_separator)
+        return formatted_value or _format_text(value)
+    if row_name == "Alpha":
+        formatted_value = _format_pvalue(value, thousands_separator=thousands_separator)
+        return formatted_value or _format_text(value)
+
+    formatted_value = format_metric_number(value)
+    if formatted_value == "":
+        return _format_text(value)
+    if thousands_separator:
+        formatted_value = _add_thousands_separator(formatted_value)
+    return formatted_value
+
+
+def _pad_design_values(values: list[str], value_count: int) -> list[str]:
+    return values + [""] * max(0, value_count - len(values))
+
+
+def _design_summary_value_row(
+    row_name: str,
+    values: list[str],
+    value_count: int,
+    *,
+    include_row_name: bool,
+) -> list[str]:
+    max_index = _max_design_value_index(values)
+    cells = [_row_header_cell(row_name)] if include_row_name else []
+    for value_index in range(value_count):
+        if value_index == max_index:
+            cells.append(_cell(values[value_index], bold=True, italic=True))
+        else:
+            cells.append(_cell(DESIGN_SEPARATOR, italic=True))
+    return cells
+
+
+def _max_design_value_index(values: list[str]) -> int | None:
+    max_index = None
+    max_value = None
+    for value_index, value in enumerate(values):
+        number_value = number_or_none(str(value).replace(",", ""))
+        if number_value is None:
+            continue
+        if max_value is None or number_value > max_value:
+            max_index = value_index
+            max_value = number_value
+    return max_index
+
+
+def _design_separator_cell(rowspan: int) -> str:
+    return _cell(
+        "",
+        background=HEADER_COLOR,
+        rowspan=rowspan,
+        raw=True,
+    )
 
 
 def _load_metric_table_configs(metrics_yaml_path: str | Path) -> list[_MetricTableConfig]:
@@ -359,13 +644,70 @@ def _number_or_none(value: Any) -> float | None:
     return number_or_none(value)
 
 
-def _format_metric_table_value(value: Any, metric_config: _MetricTableConfig) -> str:
-    return format_metric_value(value, prefix=metric_config.prefix, suffix=metric_config.suffix)
+def _format_metric_table_value(
+    value: Any,
+    metric_config: _MetricTableConfig,
+    *,
+    thousands_separator: bool,
+) -> str:
+    formatted_value = format_metric_number(value)
+    if formatted_value == "":
+        return ""
+    if thousands_separator:
+        formatted_value = _add_thousands_separator(formatted_value)
+    return apply_number_affixes(formatted_value, prefix=metric_config.prefix, suffix=metric_config.suffix)
+
+
+def _format_diff_percent(value: Any, *, thousands_separator: bool) -> str:
+    formatted_value = format_diff_percent(value)
+    if formatted_value == "" or not thousands_separator:
+        return formatted_value
+    number_part, percent_sign = formatted_value.removesuffix("%"), "%"
+    return f"{_add_thousands_separator(number_part)}{percent_sign}"
+
+
+def _format_pvalue(value: Any, *, thousands_separator: bool) -> str:
+    formatted_value = format_pvalue(value)
+    if formatted_value == "" or not thousands_separator:
+        return formatted_value
+    return _add_thousands_separator(formatted_value)
+
+
+def _add_thousands_separator(value: str) -> str:
+    value = str(value)
+    sign = ""
+    if value.startswith("-"):
+        sign = "-"
+        value = value[1:]
+
+    integer_part, dot, fractional_part = value.partition(".")
+    if not integer_part.isdigit():
+        return f"{sign}{value}"
+
+    groups = []
+    while len(integer_part) > 3:
+        groups.append(integer_part[-3:])
+        integer_part = integer_part[:-3]
+    groups.append(integer_part)
+
+    grouped_integer = ",".join(reversed(groups))
+    return f"{sign}{grouped_integer}{dot}{fractional_part}"
 
 
 def _format_variation(value: Any) -> str:
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
+    return str(value)
+
+
+def _format_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
     return str(value)
 
 
@@ -419,16 +761,20 @@ def _cell(
     *,
     background: str | None = None,
     bold: bool = False,
+    italic: bool = False,
     colspan: int | None = None,
+    rowspan: int | None = None,
     raw: bool = False,
     align: str = "right",
 ) -> str:
-    attributes = _cell_attributes(background=background, colspan=colspan, align=align)
+    attributes = _cell_attributes(background=background, colspan=colspan, rowspan=rowspan, align=align)
 
     if raw:
         return f"<td{attributes}>{value}</td>"
 
     escaped_value = escape(str(value))
+    if italic:
+        escaped_value = f"<em>{escaped_value}</em>"
     if bold:
         escaped_value = f"<strong>{escaped_value}</strong>"
     return f"<td{attributes}><p>{escaped_value}</p></td>"
@@ -438,6 +784,7 @@ def _cell_attributes(
     *,
     background: str | None,
     colspan: int | None,
+    rowspan: int | None,
     align: str,
 ) -> str:
     attributes = []
@@ -450,6 +797,8 @@ def _cell_attributes(
         attributes.append(f'style="text-align:{escape(align)}"')
     if colspan is not None:
         attributes.append(f'colspan="{int(colspan)}"')
+    if rowspan is not None:
+        attributes.append(f'rowspan="{int(rowspan)}"')
 
     return " " + " ".join(attributes) if attributes else ""
 
