@@ -204,6 +204,25 @@ def metric_columns_for_client(metrics_yaml_path: str | Path, client: str) -> set
     return columns
 
 
+def stats_columns_for_client(stats_yaml_path: str | Path, client: str) -> set[str]:
+    stats_config = load_metrics_config(stats_yaml_path)
+    columns = set()
+
+    for stat_name, stat_items in stats_config.items():
+        stat_config = normalize_metric_config(stat_items)
+        table_position = int(stat_config.get("table_position") or 0)
+        if table_position <= 0:
+            continue
+
+        platforms = stat_config.get("platforms", [])
+        if platforms and client not in platforms:
+            continue
+
+        columns.add(str(stat_name))
+
+    return columns
+
+
 def load_funnels_config(funnels_yaml_path: str | Path) -> dict[str, Any]:
     with Path(funnels_yaml_path).open("r", encoding="utf-8") as file:
         return yaml.safe_load(file) or {}

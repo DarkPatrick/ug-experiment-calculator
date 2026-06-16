@@ -16,6 +16,7 @@ from .metrics import (
     load_funnels_config,
     metric_columns_for_client,
     normalize_funnel_config,
+    stats_columns_for_client,
 )
 from .repository import (
     create_exp_funnel_results_table,
@@ -206,7 +207,7 @@ def calculate_exp_info(
                 client=client,
             )
 
-            stats_metric_columns = metric_columns_for_client(cfg.metrics_yaml_path, client)
+            stats_metric_columns = stats_columns_for_client(cfg.stats_yaml_path, client)
             stats_metric_columns = [col for col in df_cum_agg.columns if col in stats_metric_columns]
             df_cum_agg = df_cum_agg[["dt", "variation", *stats_metric_columns]]
             df_cum_agg = df_cum_agg.melt(id_vars=["dt", "variation"], var_name="metric", value_name="value")

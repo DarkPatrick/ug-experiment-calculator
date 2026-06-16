@@ -70,6 +70,7 @@ _EXPORTS = {
     "normalize_metric_config": ("metrics", "normalize_metric_config"),
     "number_or_none": ("value_formatting", "number_or_none"),
     "safe_divide": ("metrics", "safe_divide"),
+    "stats_columns_for_client": ("metrics", "stats_columns_for_client"),
     "update_exp_results_table": ("repository", "update_exp_results_table"),
     "update_subscription_source_tables": ("repository", "update_subscription_source_tables"),
 }

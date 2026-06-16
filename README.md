@@ -145,7 +145,7 @@ calculate_exp_info(123456, config=config)
 - `client`
 - `segment`
 
-`ug_exp_stats` хранит метрики в long-формате:
+`ug_exp_stats` хранит summary-статистики из `stats.yaml` в long-формате:
 
 - `dt`
 - `variation`
@@ -560,6 +560,7 @@ from ug_experiment_calculator import (
     calc_metrics_stats_by_variation_pairs,
     calc_stats,
     metric_columns_for_client,
+    stats_columns_for_client,
 )
 ```
 
@@ -567,6 +568,7 @@ from ug_experiment_calculator import (
 - `calc_metrics_stats_by_variation_pairs(cumulative_df, metrics_yaml_path, control_variation=1, client="")` - pairwise-статистика метрик.
 - `calc_stats(...)` - низкоуровневый расчет p-value, Cohen's d и confidence interval.
 - `metric_columns_for_client(metrics_yaml_path, client)` - колонки из `metrics.yaml`, нужные платформе.
+- `stats_columns_for_client(stats_yaml_path, client)` - колонки из `stats.yaml`, нужные платформе для записи в `ug_exp_stats`.
 
 ### Графики
 
