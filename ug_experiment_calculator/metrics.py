@@ -221,9 +221,29 @@ def funnel_platforms(funnel_config: dict) -> list[str]:
     return funnel_config.get("platforms") or conditions.get("platforms", [])
 
 
+def _funnel_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def funnel_calculation_enabled(funnel_config: dict) -> bool:
+    return _funnel_bool(
+        funnel_config.get(
+            "enabled",
+            funnel_config.get("calculate", funnel_config.get("calculate_funnel")),
+        ),
+        default=False,
+    )
+
+
 def funnel_enabled_for_client(funnel_config: dict, client: str) -> bool:
     platforms = funnel_platforms(funnel_config)
-    return client in platforms
+    return funnel_calculation_enabled(funnel_config) and client in platforms
 
 
 def calc_stats(mean_0, mean_1, var_0, var_1, len_0, len_1, alpha=None, required_power=None, pvalue=None, calc_mean=False):

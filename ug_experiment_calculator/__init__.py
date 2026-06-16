@@ -37,6 +37,7 @@ _EXPORTS = {
     "format_metric_value": ("value_formatting", "format_metric_value"),
     "format_plain_number": ("value_formatting", "format_plain_number"),
     "format_pvalue": ("value_formatting", "format_pvalue"),
+    "funnel_calculation_enabled": ("metrics", "funnel_calculation_enabled"),
     "funnel_enabled_for_client": ("metrics", "funnel_enabled_for_client"),
     "get_experiment": ("repository", "get_experiment"),
     "get_experiment_confluence_table_code": ("confluence_tables", "get_experiment_confluence_table_code"),

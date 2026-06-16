@@ -31,7 +31,7 @@ class ExperimentCalculatorConfig:
     stats_yaml_path: Path = DEFAULT_STATS_YAML_PATH
     funnels_yaml_path: Path = DEFAULT_FUNNELS_YAML_PATH
     default_clients: tuple[str, ...] = ("UGT_IOS", "UGT_ANDROID", "UG_WEB")
-    update_subscription_sources: bool = True
+    update_subscription_sources: bool = False
 
     @classmethod
     def from_env(cls, prefix: str = "EXPERIMENT_") -> "ExperimentCalculatorConfig":
@@ -56,7 +56,7 @@ class ExperimentCalculatorConfig:
             stats_yaml_path=Path(stats_yaml_path) if stats_yaml_path else DEFAULT_STATS_YAML_PATH,
             funnels_yaml_path=Path(funnels_yaml_path) if funnels_yaml_path else DEFAULT_FUNNELS_YAML_PATH,
             default_clients=default_clients,
-            update_subscription_sources=_env_bool(f"{prefix}UPDATE_SUBSCRIPTION_SOURCES", True),
+            update_subscription_sources=_env_bool(f"{prefix}UPDATE_SUBSCRIPTION_SOURCES", False),
         )
 
     def physical_table(self, logical_table_name: str) -> str:

@@ -83,7 +83,7 @@ calculate_exp_info(123456, config=config)
 | `EXPERIMENT_STATS_YAML_PATH` | `ug_experiment_calculator/stats.yaml` | Путь к конфигу summary-статов. |
 | `EXPERIMENT_FUNNELS_YAML_PATH` | `ug_experiment_calculator/funnels.yaml` | Путь к конфигу воронок. |
 | `EXPERIMENT_DEFAULT_CLIENTS` | `UGT_IOS,UGT_ANDROID,UG_WEB` | Платформы, если в эксперименте не указан список клиентов. |
-| `EXPERIMENT_UPDATE_SUBSCRIPTION_SOURCES` | `true` | Обновлять ли кэши `subscriptions` и `subscriptions_transactions` перед расчетом. |
+| `EXPERIMENT_UPDATE_SUBSCRIPTION_SOURCES` | `false` | Обновлять ли кэши `subscriptions` и `subscriptions_transactions` перед расчетом. |
 
 `table_prefix` применяется к физическому имени таблицы. Например, логическая таблица `ug_exp_results` при `table_prefix="dev_"` станет `sandbox.dev_ug_exp_results`.
 
@@ -200,6 +200,7 @@ arpu, $:
 
 ```yaml
 tour_subscription_funnels:
+  - enabled: false
   - query: tour_subscription_funnels
   - name: "Tour subscription funnels"
   - description: "APP Funnels for Tour Install Pro trials, Tour Instant Offer charges, and Tour Post Decline Instant Offer subscriptions"
@@ -213,6 +214,7 @@ tour_subscription_funnels:
 2. SQL должен возвращать `dt`, `variation`, идентификаторы funnel/transition и колонки `denominator_users`, `numerator_users`.
 3. Добавить запись в `funnels.yaml`.
 4. Указать платформы через `platforms` или `conditions.platforms`.
+5. Явно включить расчет через `enabled: true` или `calculate: true`; по умолчанию воронки не считаются.
 
 Воронки считаются отдельно от обычных метрик. Генерация ECharts для воронок пока не реализована.
 
@@ -590,6 +592,7 @@ from ug_experiment_calculator import (
 from ug_experiment_calculator import (
     calc_cumulative_funnel_aggregates,
     calc_funnel_stats_by_variation_pairs,
+    funnel_calculation_enabled,
     load_funnels_config,
     funnel_enabled_for_client,
 )
@@ -597,8 +600,9 @@ from ug_experiment_calculator import (
 
 - `calc_cumulative_funnel_aggregates(df)` - накопленные denominator/numerator и conversion по funnel-переходам.
 - `calc_funnel_stats_by_variation_pairs(cumulative_df, control_variation=1)` - pairwise-статистика воронок.
+- `funnel_calculation_enabled(funnel_config)` - проверить, включен ли расчет воронки.
 - `load_funnels_config(path)` - загрузить `funnels.yaml`.
-- `funnel_enabled_for_client(funnel_config, client)` - проверить, разрешена ли воронка для платформы.
+- `funnel_enabled_for_client(funnel_config, client)` - проверить, включен ли расчет воронки и разрешена ли она для платформы.
 
 ### ClickHouse helpers
 
