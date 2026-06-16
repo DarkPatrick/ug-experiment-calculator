@@ -19,6 +19,7 @@ from .config import ExperimentCalculatorConfig
 from .confluence_charts import (
     build_metric_confluence_chart_code,
     build_metric_confluence_lift_chart_code,
+    build_stat_confluence_chart_code,
 )
 from .metrics import load_metrics_config, normalize_metric_config
 from .value_formatting import (
@@ -44,6 +45,15 @@ TABLE_COLUMNS: tuple[str, ...] = (
     "segment",
 )
 
+STATS_TABLE_COLUMNS: tuple[str, ...] = (
+    "dt",
+    "metric",
+    "variation",
+    "value",
+    "client",
+    "segment",
+)
+
 DESIGN_TABLE_COLUMNS: tuple[str, ...] = (
     "Metrics",
     "Design / each metric",
@@ -65,10 +75,12 @@ DESIGN_SEPARATOR = "—"
 @dataclass(frozen=True)
 class _MetricTableConfig:
     name: str
+    display_name: str
     table_position: int
     positive: bool
     prefix: str
     suffix: str
+    value_type: str
     source_index: int
 
 
@@ -142,6 +154,70 @@ def get_experiment_confluence_table_code(
     )
 
 
+def get_experiment_stats_confluence_table_data(
+    exp_id: int,
+    *,
+    clients: Optional[Sequence[str]] = None,
+    segments: Optional[Sequence[str]] = None,
+    metrics: Optional[Sequence[str]] = None,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
+    from clickhouse_worker import execute_sql
+
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    filters = [f"`exp_id` = {int(exp_id)}"]
+    filters.extend(_in_filter("client", clients, _clickhouse_string_literal))
+    filters.extend(_in_filter("segment", segments, _clickhouse_string_literal))
+    filters.extend(_in_filter("metric", metrics, _clickhouse_string_literal))
+    where_sql = "\n        and ".join(filters)
+
+    query = f"""
+        select
+            `dt`,
+            `metric`,
+            `variation`,
+            `value`,
+            `client`,
+            `segment`
+        from {cfg.exp_stats_table}
+        where
+            {where_sql}
+        order by
+            `client`,
+            `segment`,
+            `dt`,
+            `variation`,
+            `metric`
+    """
+    return execute_sql(query)
+
+
+def get_experiment_stats_confluence_table_code(
+    exp_id: int,
+    *,
+    clients: Optional[Sequence[str]] = None,
+    segments: Optional[Sequence[str]] = None,
+    stats_yaml_path: str | Path | None = None,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    thousands_separator: bool = True,
+) -> str:
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path)
+    rows = get_experiment_stats_confluence_table_data(
+        exp_id,
+        clients=clients,
+        segments=segments,
+        metrics=[stats_config.name for stats_config in stats_configs],
+        config=cfg,
+    )
+    return build_experiment_stats_confluence_table_code(
+        rows,
+        stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+        thousands_separator=thousands_separator,
+    )
+
+
 def build_experiment_confluence_table_code(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
@@ -172,6 +248,38 @@ def build_experiment_confluence_table_code(
             client_blocks.append(table_html)
 
     return "\n".join(client_blocks)
+
+
+def build_experiment_stats_confluence_table_code(
+    rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    *,
+    stats_yaml_path: str | Path | None = None,
+    thousands_separator: bool = True,
+) -> str:
+    df = _prepare_stats_table_rows(rows)
+    cfg = ExperimentCalculatorConfig.from_env()
+    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path)
+
+    if df.empty or not stats_configs:
+        return _ui_expand("Stats", _table([]))
+
+    client_names = _ordered_values(df["client"])
+    client_blocks = []
+    for client in client_names:
+        client_df = df[df["client"] == client].copy()
+        table_html = _build_stats_client_table(
+            client_df,
+            stats_configs,
+            thousands_separator=thousands_separator,
+        )
+        if not table_html:
+            continue
+        if len(client_names) > 1:
+            client_blocks.append(_ui_expand(str(client), table_html))
+        else:
+            client_blocks.append(table_html)
+
+    return _ui_expand("Stats", "\n".join(client_blocks) if client_blocks else _table([]))
 
 
 def build_design_confluence_table_code(
@@ -232,6 +340,33 @@ def _build_client_table(
     return _table(rows)
 
 
+def _build_stats_client_table(
+    df: pd.DataFrame,
+    stats_configs: list[_MetricTableConfig],
+    *,
+    thousands_separator: bool,
+) -> str:
+    metric_names = set(df["metric"])
+    stats_configs = [stats_config for stats_config in stats_configs if stats_config.name in metric_names]
+    if not stats_configs:
+        return ""
+
+    rows = []
+    segment_names = _ordered_segments(df["segment"])
+    for segment_index, segment in enumerate(segment_names):
+        segment_df = df[df["segment"] == segment].copy()
+        if segment_index > 0 or segment != TOTAL_SEGMENT:
+            rows.append(_segment_row(str(segment), len(stats_configs) + 1))
+        rows.extend(
+            _build_stats_segment_rows(
+                segment_df,
+                stats_configs,
+                thousands_separator=thousands_separator,
+            )
+        )
+    return _table(rows)
+
+
 def _build_segment_rows(
     df: pd.DataFrame,
     metric_configs: list[_MetricTableConfig],
@@ -274,12 +409,65 @@ def _build_segment_rows(
     return rows
 
 
+def _build_stats_segment_rows(
+    df: pd.DataFrame,
+    stats_configs: list[_MetricTableConfig],
+    *,
+    thousands_separator: bool,
+) -> list[str]:
+    latest_df = _latest_stats_rows(df)
+    variations = _stat_variations(latest_df)
+
+    rows = [_header_row(stats_configs)]
+    if any(str(variation) == "1" for variation in variations):
+        rows.append(_stats_variation_row(latest_df, stats_configs, 1, "Control", thousands_separator=thousands_separator))
+
+    for variation in variations:
+        if str(variation) == "1":
+            continue
+        rows.append(
+            _stats_variation_row(
+                latest_df,
+                stats_configs,
+                variation,
+                f"Variation {_format_variation(variation)}",
+                thousands_separator=thousands_separator,
+            )
+        )
+
+    rows.append(_stats_cumulatives_row(df, stats_configs))
+    return rows
+
+
 def _header_row(metric_configs: list[_MetricTableConfig]) -> str:
     cells = [_cell("Variation", background=HEADER_COLOR, bold=True, align="left")]
     cells.extend(
-        _cell(metric_config.name, background=HEADER_COLOR, bold=True, align="left")
+        _cell(metric_config.display_name, background=HEADER_COLOR, bold=True, align="left")
         for metric_config in metric_configs
     )
+    return _row(cells)
+
+
+def _stats_variation_row(
+    df: pd.DataFrame,
+    stats_configs: list[_MetricTableConfig],
+    variation: Any,
+    row_label: str,
+    *,
+    thousands_separator: bool,
+) -> str:
+    cells = [_row_header_cell(row_label)]
+    for stats_config in stats_configs:
+        row = _latest_stats_metric_row(df, stats_config.name, variation)
+        cells.append(
+            _cell(
+                _format_stats_table_value(
+                    _row_number(row, "value"),
+                    stats_config,
+                    thousands_separator=thousands_separator,
+                )
+            )
+        )
     return _row(cells)
 
 
@@ -380,6 +568,19 @@ def _cumulatives_row(df: pd.DataFrame, metric_configs: list[_MetricTableConfig])
             build_metric_confluence_chart_code(metric_rows, metric_config.name),
             build_metric_confluence_lift_chart_code(metric_rows, metric_config.name),
         ])
+        cells.append(_cell(chart_code, raw=True))
+    return _row(cells)
+
+
+def _stats_cumulatives_row(df: pd.DataFrame, stats_configs: list[_MetricTableConfig]) -> str:
+    cells = [_row_header_cell("cumulatives")]
+    for stats_config in stats_configs:
+        metric_rows = df[df["metric"] == stats_config.name]
+        if metric_rows.empty:
+            cells.append(_cell(""))
+            continue
+
+        chart_code = build_stat_confluence_chart_code(metric_rows, stats_config.name)
         cells.append(_cell(chart_code, raw=True))
     return _row(cells)
 
@@ -628,10 +829,12 @@ def _load_metric_table_configs(metrics_yaml_path: str | Path) -> list[_MetricTab
 
         result.append(_MetricTableConfig(
             name=metric_name,
+            display_name=str(metric_config.get("display_name") or metric_name),
             table_position=table_position,
             positive=bool(int(metric_config.get("positive", 1))),
             prefix=str(metric_config.get("prefix") or ""),
             suffix=str(metric_config.get("suffix") or ""),
+            value_type=str(metric_config.get("type") or ""),
             source_index=metric_index,
         ))
 
@@ -667,10 +870,44 @@ def _prepare_table_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.
     return df.sort_values(sort_columns).reset_index(drop=True)
 
 
+def _prepare_stats_table_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:
+    df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
+    if df.empty:
+        for column in STATS_TABLE_COLUMNS:
+            if column not in df.columns:
+                df[column] = pd.Series(dtype="object")
+        return df
+
+    missing_columns = set(STATS_TABLE_COLUMNS).difference(df.columns)
+    if missing_columns:
+        missing_columns_str = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Missing Confluence stats table columns: {missing_columns_str}")
+
+    df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
+    df = df.dropna(subset=["dt", "metric", "variation", "client", "segment"]).copy()
+
+    for column in ("metric", "client", "segment"):
+        df[column] = df[column].astype(str)
+    df["variation"] = df["variation"].map(_normalize_variation_value)
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+
+    sort_columns = ["client", "segment", "metric", "variation", "dt"]
+    return df.sort_values(sort_columns, key=_stats_sort_key).reset_index(drop=True)
+
+
 def _latest_rows(df: pd.DataFrame) -> pd.DataFrame:
     return (
         df.sort_values("dt")
         .groupby(["metric", "variation_pair"], as_index=False, dropna=False)
+        .tail(1)
+        .reset_index(drop=True)
+    )
+
+
+def _latest_stats_rows(df: pd.DataFrame) -> pd.DataFrame:
+    return (
+        df.sort_values("dt")
+        .groupby(["metric", "variation"], as_index=False, dropna=False)
         .tail(1)
         .reset_index(drop=True)
     )
@@ -683,8 +920,20 @@ def _latest_metric_pair_row(df: pd.DataFrame, metric: str, test_variation: Any) 
     return row.iloc[0]
 
 
+def _latest_stats_metric_row(df: pd.DataFrame, metric: str, variation: Any) -> pd.Series | None:
+    row = df[(df["metric"] == metric) & (df["variation"].map(str) == str(variation))]
+    if row.empty:
+        return None
+    return row.iloc[0]
+
+
 def _test_variations(df: pd.DataFrame) -> list[Any]:
     values = df["test_variation"].dropna().drop_duplicates().tolist()
+    return sorted(values, key=_variation_sort_key)
+
+
+def _stat_variations(df: pd.DataFrame) -> list[Any]:
+    values = df["variation"].dropna().drop_duplicates().tolist()
     return sorted(values, key=_variation_sort_key)
 
 
@@ -736,6 +985,30 @@ def _format_metric_table_value(
     if thousands_separator:
         formatted_value = _add_thousands_separator(formatted_value)
     return apply_number_affixes(formatted_value, prefix=metric_config.prefix, suffix=metric_config.suffix)
+
+
+def _format_stats_table_value(
+    value: Any,
+    stats_config: _MetricTableConfig,
+    *,
+    thousands_separator: bool,
+) -> str:
+    if stats_config.value_type == "int":
+        formatted_value = _format_int_value(value)
+        if formatted_value == "":
+            return ""
+        if thousands_separator:
+            formatted_value = _add_thousands_separator(formatted_value)
+        return apply_number_affixes(formatted_value, prefix=stats_config.prefix, suffix=stats_config.suffix)
+
+    return _format_metric_table_value(value, stats_config, thousands_separator=thousands_separator)
+
+
+def _format_int_value(value: Any) -> str:
+    number_value = _number_or_none(value)
+    if number_value is None:
+        return ""
+    return str(int(round(number_value)))
 
 
 def _format_diff_percent(value: Any, *, thousands_separator: bool) -> str:
@@ -812,6 +1085,12 @@ def _variation_sort_key(value: Any) -> tuple[int, Any]:
     if number_value is None:
         return (1, str(value))
     return (0, number_value)
+
+
+def _stats_sort_key(series: pd.Series) -> pd.Series:
+    if series.name == "variation":
+        return pd.to_numeric(series, errors="coerce").fillna(float("inf"))
+    return series
 
 
 def _table(rows: list[str]) -> str:

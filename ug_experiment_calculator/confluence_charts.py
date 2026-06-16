@@ -8,20 +8,25 @@ from typing import Any, Literal, Optional
 import numpy as np
 import pandas as pd
 
+from .colors import CHART_COLOR_RGB_VALUES, SIGNIFICANCE_LEVEL_COLOR
 from .config import ExperimentCalculatorConfig
-from .echarts import ECHARTS_COLOR_RGB_VALUES
 from .value_formatting import format_plain_number
 
 
 CONFLUENCE_DATE_FORMAT = "yyyy-MM-dd"
 SIGNIFICANCE_LEVEL_SERIES_NAME = "α = 0.05"
-SIGNIFICANCE_LEVEL_COLOR = "#ff0000"
 PVALUE_CHART_SUBTITLE = "p-value"
 DIFF_CHART_SUBTITLE = "diff, %"
+STAT_CHART_SUBTITLE = "cumulative"
 
 CONFLUENCE_CHART_BASE_COLUMNS: tuple[str, ...] = (
     "dt",
     "variation_pair",
+)
+
+CONFLUENCE_STAT_CHART_BASE_COLUMNS: tuple[str, ...] = (
+    "dt",
+    "variation",
 )
 
 
@@ -154,6 +159,45 @@ def build_metric_confluence_lift_chart_code(
     raise ValueError(f"Unsupported output_format: {output_format}")
 
 
+def build_stat_confluence_chart_code(
+    rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    metric: str,
+    *,
+    output_format: Literal["storage", "wiki"] = "storage",
+    width: int = 250,
+    height: int = 250,
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = STAT_CHART_SUBTITLE,
+    image_format: str = "png",
+) -> str:
+    chart_data = _prepare_stat_chart_data(rows)
+    domain_axis_tick_unit = _domain_axis_tick_unit(chart_data.dates, max_x_ticks=max_x_ticks)
+
+    if output_format == "storage":
+        return _build_storage_chart_code(
+            chart_data,
+            title=title,
+            width=width,
+            height=height,
+            domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
+            image_format=image_format,
+        )
+    if output_format == "wiki":
+        return _build_wiki_chart_code(
+            chart_data,
+            title=title,
+            width=width,
+            height=height,
+            domain_axis_tick_unit=domain_axis_tick_unit,
+            title_placement=title_placement,
+            image_format=image_format,
+        )
+
+    raise ValueError(f"Unsupported output_format: {output_format}")
+
+
 def get_metric_confluence_chart_code(
     exp_id: int,
     metric: str,
@@ -204,6 +248,66 @@ def get_metric_confluence_lift_chart_code(
 ) -> str:
     rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
     return build_metric_confluence_lift_chart_code(
+        rows,
+        metric,
+        output_format=output_format,
+        width=width,
+        height=height,
+        max_x_ticks=max_x_ticks,
+        title_placement=title_placement,
+        title=title,
+        image_format=image_format,
+    )
+
+
+def get_stat_confluence_chart_data(
+    exp_id: int,
+    metric: str,
+    client: str,
+    segment: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
+    from clickhouse_worker import execute_sql
+
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    query = f"""
+        select
+            `dt`,
+            `metric`,
+            `variation`,
+            `value`
+        from {cfg.exp_stats_table}
+        where
+            `exp_id` = {int(exp_id)}
+        and `metric` = {_clickhouse_string_literal(metric)}
+        and `client` = {_clickhouse_string_literal(client)}
+        and `segment` = {_clickhouse_string_literal(segment)}
+        order by
+            `dt`,
+            `variation`
+    """
+    return execute_sql(query)
+
+
+def get_stat_confluence_chart_code(
+    exp_id: int,
+    metric: str,
+    client: str,
+    segment: str,
+    *,
+    output_format: Literal["storage", "wiki"] = "storage",
+    width: int = 250,
+    height: int = 250,
+    max_x_ticks: int = 2,
+    title_placement: Literal["subtitle", "title", "none"] = "subtitle",
+    title: str = STAT_CHART_SUBTITLE,
+    image_format: str = "png",
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    rows = get_stat_confluence_chart_data(exp_id, metric, client, segment, config=config)
+    return build_stat_confluence_chart_code(
         rows,
         metric,
         output_format=output_format,
@@ -268,6 +372,38 @@ def _prepare_chart_data(
         constant_number = _number_or_none(constant_value)
         for date in dates:
             values_by_date[date][constant_series_name] = constant_number
+
+    return _ChartData(dates=dates, series_names=series_names, values_by_date=values_by_date)
+
+
+def _prepare_stat_chart_data(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> _ChartData:
+    df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
+    required_columns = (*CONFLUENCE_STAT_CHART_BASE_COLUMNS, "value")
+
+    if df.empty:
+        for column in required_columns:
+            if column not in df.columns:
+                df[column] = pd.Series(dtype="object")
+        return _ChartData(dates=[], series_names=[], values_by_date={})
+
+    missing_columns = set(required_columns).difference(df.columns)
+    if missing_columns:
+        missing_columns_str = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Missing Confluence stat chart columns: {missing_columns_str}")
+
+    df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
+    df = df.dropna(subset=["dt", "variation"]).copy()
+    df["variation"] = df["variation"].map(_normalize_variation_value)
+    df["series_name"] = df["variation"].map(_variation_series_name)
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.sort_values(["variation", "dt"], key=_variation_sort_key_series).reset_index(drop=True)
+    df["date_value"] = df["dt"].map(_date_value)
+
+    dates = sorted(df["date_value"].dropna().unique().tolist())
+    series_names = [str(name) for name in df["series_name"].drop_duplicates().tolist()]
+    values_by_date: dict[str, dict[str, float | None]] = {date: {} for date in dates}
+    for _, row in df.iterrows():
+        values_by_date[row["date_value"]][row["series_name"]] = _number_or_none(row["value"])
 
     return _ChartData(dates=dates, series_names=series_names, values_by_date=values_by_date)
 
@@ -435,7 +571,7 @@ def _parameter_number(value: float) -> str:
 
 
 def _hex_color(index: int) -> str:
-    red, green, blue = ECHARTS_COLOR_RGB_VALUES[index % len(ECHARTS_COLOR_RGB_VALUES)]
+    red, green, blue = CHART_COLOR_RGB_VALUES[index % len(CHART_COLOR_RGB_VALUES)]
     return f"#{red:02x}{green:02x}{blue:02x}"
 
 
@@ -465,6 +601,25 @@ def _number_or_none(value: Any) -> float | None:
     if not np.isfinite(number_value):
         return None
     return number_value
+
+
+def _normalize_variation_value(value: Any) -> Any:
+    number_value = _number_or_none(value)
+    if number_value is None:
+        return value
+    if number_value.is_integer():
+        return int(number_value)
+    return number_value
+
+
+def _variation_series_name(value: Any) -> str:
+    return "Control" if str(value) == "1" else f"Variation {value}"
+
+
+def _variation_sort_key_series(series: pd.Series) -> pd.Series:
+    if series.name == "variation":
+        return pd.to_numeric(series, errors="coerce").fillna(float("inf"))
+    return series
 
 
 def _format_cell_value(value: Any) -> str:

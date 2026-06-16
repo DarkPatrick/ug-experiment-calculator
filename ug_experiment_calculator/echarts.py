@@ -9,17 +9,10 @@ import numpy as np
 import pandas as pd
 
 from .config import ExperimentCalculatorConfig
+from .colors import CHART_COLOR_RGB_VALUES
 
 
-ECHARTS_COLOR_RGB_VALUES: tuple[tuple[int, int, int], ...] = (
-    (31, 119, 180),
-    (255, 127, 14),
-    (44, 160, 44),
-    (214, 39, 40),
-    (148, 103, 189),
-    (140, 86, 75),
-    (227, 119, 194),
-)
+ECHARTS_COLOR_RGB_VALUES = CHART_COLOR_RGB_VALUES
 
 METRIC_RESULT_COLUMNS: tuple[str, ...] = (
     "dt",

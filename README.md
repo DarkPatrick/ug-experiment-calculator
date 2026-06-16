@@ -432,6 +432,40 @@ table_code = build_experiment_confluence_table_code(
 
 Ожидаемые колонки `rows`: `dt`, `metric`, `variation_pair`, `mean_0`, `mean_1`, `lift`, `pvalue`, `client`, `segment`. Опционально полезны `control_variation` и `test_variation`.
 
+Для статистик из `ug_exp_stats` есть аналогичная Confluence-таблица, обернутая в свернутый `ui-expand` с названием `Stats`.
+
+```python
+from ug_experiment_calculator import get_experiment_stats_confluence_table_code
+
+stats_table_code = get_experiment_stats_confluence_table_code(
+    exp_id=123456,
+    thousands_separator=True,
+)
+```
+
+Строки каждого stats-блока:
+
+- `Variation` - заголовок, дальше статистики из `stats.yaml`;
+- `Control` - последнее значение variation `1`;
+- `Variation N` - последнее значение variation `N`;
+- `cumulatives` - один Confluence Chart macro `250x250` с накопленными значениями статистики по дням, серии сгруппированы по вариациям, ось дат ограничена двумя отсечками.
+
+Колонки статистик берутся из `stats.yaml`: только элементы с `table_position > 0`, порядок по `table_position`. Заголовок использует `display_name`, если он задан. Значения используют те же правила форматирования, `prefix` и `suffix`, что и таблица метрик.
+
+Из готовых строк:
+
+```python
+from ug_experiment_calculator import build_experiment_stats_confluence_table_code
+
+stats_table_code = build_experiment_stats_confluence_table_code(
+    rows,
+    stats_yaml_path="ug_experiment_calculator/stats.yaml",
+    thousands_separator=True,
+)
+```
+
+Ожидаемые колонки `rows`: `dt`, `metric`, `variation`, `value`, `client`, `segment`.
+
 ## Confluence-таблица дизайна эксперимента
 
 ```python
@@ -540,16 +574,20 @@ from ug_experiment_calculator import (
 from ug_experiment_calculator import (
     build_design_confluence_table_code,
     build_experiment_confluence_table_code,
+    build_experiment_stats_confluence_table_code,
     build_latest_experiment_summary_tables,
     build_metric_confluence_chart_code,
     build_metric_confluence_lift_chart_code,
     build_metric_echarts_code,
     build_metric_echarts_options,
+    build_stat_confluence_chart_code,
     get_experiment_confluence_table_code,
+    get_experiment_stats_confluence_table_code,
     get_latest_experiment_summary_tables,
     get_metric_confluence_chart_code,
     get_metric_confluence_lift_chart_code,
     get_metric_echarts_code,
+    get_stat_confluence_chart_code,
 )
 ```
 
@@ -560,8 +598,12 @@ from ug_experiment_calculator import (
 - `build_metric_confluence_chart_code(rows, metric, ...)` - собрать Confluence Chart macro из готовых строк.
 - `get_metric_confluence_lift_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative diff.
 - `build_metric_confluence_lift_chart_code(rows, metric, ...)` - собрать lift Confluence Chart macro из готовых строк.
+- `get_stat_confluence_chart_code(...)` - прочитать `ug_exp_stats` и вернуть Confluence Chart macro для cumulative-статистики.
+- `build_stat_confluence_chart_code(rows, metric, ...)` - собрать Confluence Chart macro по `dt`, `variation`, `value`.
 - `get_experiment_confluence_table_code(...)` - прочитать `ug_exp_results` и вернуть Confluence storage table по эксперименту.
 - `build_experiment_confluence_table_code(rows, metrics_yaml_path=...)` - собрать Confluence storage table из готовых строк.
+- `get_experiment_stats_confluence_table_code(...)` - прочитать `ug_exp_stats` и вернуть Confluence storage table для статистик внутри `ui-expand` `Stats`.
+- `build_experiment_stats_confluence_table_code(rows, stats_yaml_path=...)` - собрать Confluence storage table для статистик из готовых строк.
 - `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
 - `get_latest_experiment_summary_tables(...)` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
 - `build_latest_experiment_summary_tables(results_rows, stats_rows, ...)` - собрать latest summary DataFrame из готовых строк.
