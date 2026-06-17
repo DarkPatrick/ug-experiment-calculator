@@ -69,6 +69,28 @@ def create_table_sql(
     )
 
 
+def create_transient_table_sql(
+    table_name: str,
+    *,
+    schema: str,
+    partition: str,
+    sorting: str,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    return get_query(
+        "create_transient_table_template",
+        params={
+            "full_table_name": cfg.full_table(table_name),
+            "cluster": cfg.cluster,
+            "schema": schema,
+            "partition": partition,
+            "sorting": sorting,
+        },
+        config=cfg,
+    )
+
+
 def drop_exp_partitions(
     exp_id: int,
     client_name: str,
@@ -940,7 +962,7 @@ def create_experiments_subscription_table(
     cfg = get_config(config)
     session_id = generate_random_id(32)
     table_name = f"exp_subscription_{exp_info['id']}_{session_id}"
-    query_part_1 = create_table_sql(
+    query_part_1 = create_transient_table_sql(
         table_name,
         schema="",
         partition="toYYYYMM(toDate(subscribed_dt))",
