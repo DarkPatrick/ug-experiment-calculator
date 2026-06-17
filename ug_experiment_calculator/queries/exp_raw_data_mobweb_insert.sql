@@ -30,12 +30,24 @@ with
             argMin(`urew`.`auth`, `urew`.`datetime`) AS `auth`
         from
             `default`.`ug_rt_events_web` as `urew`
+        left join
+            {exp_users_table} as `eut`
+        on
+            `urew`.`unified_id` = `eut`.`unified_id`
+        and
+            `eut`.`client` = {client_sql}
+        and
+            `eut`.`segment` = {segment_sql}
+        and
+            `eut`.`segment_hash` = {segment_hash_sql}
         where
             `urew`.`date` = `date_filter`
         and
             `urew`.`datetime` between toDateTime(tupleElement(exp_data,2)) and `exp_end_dt`
         and
             `urew`.`unified_id` > 0
+        and
+            `eut`.`unified_id` = 0
         and
             (where_condition)
         and

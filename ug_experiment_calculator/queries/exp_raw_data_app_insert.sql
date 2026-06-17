@@ -26,7 +26,10 @@ select
     argMin(`urea`.`user_id`, `urea`.`datetime`) AS `user_id`,
     argMin(`urea`.`payment_account_id`, `urea`.`datetime`) AS `payment_account_id`,
     argMin(`urea`.`country`, `urea`.`datetime`) AS `country`,
-    argMin(`urea`.`auth`, `urea`.`datetime`) AS `auth`
+    argMin(`urea`.`auth`, `urea`.`datetime`) AS `auth`,
+    toInt64(0) AS `app_unified_id`,
+    toUInt8(1) AS `has_app`,
+    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urea`.`unified_id`)])) AS `subscription_unified_ids`
     -- , [('platform', toString(argMin(`urea`.`platform`, `urea`.`datetime`))), ('value', toString(argMin(`urea`.`value`, `urea`.`datetime`)))] as `params`
 from
     `default`.`ug_rt_events_app` as `urea`

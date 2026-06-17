@@ -106,7 +106,13 @@
         uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`cancel_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600) as `cancel_14d_cnt`,
         uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`cancel_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 2592000) as `cancel_1m_cnt`
     from (
-        select distinct *
+        select distinct
+            *,
+            if(
+                empty(`subscription_unified_ids`),
+                arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                `subscription_unified_ids`
+            ) as `subscription_join_unified_ids`
         from {exp_users_table}
         where
             `client` = {client_sql}
@@ -116,11 +122,36 @@
             `segment_hash` = {segment_hash_sql}
     ) as `eut`
     left join (
-        select distinct *
-        from {subscription_table}
+        select distinct
+            `sta`.*,
+            `eum`.`exp_unified_id` as `exp_unified_id`
+        from (
+            select distinct *
+            from {subscription_table}
+        ) as `sta`
+        inner join (
+            select distinct
+                `unified_id` as `exp_unified_id`,
+                arrayJoin(
+                    if(
+                        empty(`subscription_unified_ids`),
+                        arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                        `subscription_unified_ids`
+                    )
+                ) as `subscription_join_unified_id`
+            from {exp_users_table}
+            where
+                `client` = {client_sql}
+            and
+                `segment` = {segment_sql}
+            and
+                `segment_hash` = {segment_hash_sql}
+        ) as `eum`
+        on
+            `sta`.`unified_id` = `eum`.`subscription_join_unified_id`
     )as `sta`
     on
-        `eut`.`unified_id` = `sta`.`unified_id`
+        `eut`.`unified_id` = `sta`.`exp_unified_id`
     left join (
         select
             `dt`,
@@ -133,7 +164,13 @@
                 `eut`.`unified_id` as `unified_id`,
                 uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_otp` = 0) as `subscriptions_per_user_cnt`
             from (
-                select distinct *
+                select distinct
+                    *,
+                    if(
+                        empty(`subscription_unified_ids`),
+                        arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                        `subscription_unified_ids`
+                    ) as `subscription_join_unified_ids`
                 from {exp_users_table}
                 where
                     `client` = {client_sql}
@@ -143,11 +180,36 @@
                     `segment_hash` = {segment_hash_sql}
             ) as `eut`
             left join (
-                select distinct *
-                from {subscription_table}
+                select distinct
+                    `sta`.*,
+                    `eum`.`exp_unified_id` as `exp_unified_id`
+                from (
+                    select distinct *
+                    from {subscription_table}
+                ) as `sta`
+                inner join (
+                    select distinct
+                        `unified_id` as `exp_unified_id`,
+                        arrayJoin(
+                            if(
+                                empty(`subscription_unified_ids`),
+                                arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                                `subscription_unified_ids`
+                            )
+                        ) as `subscription_join_unified_id`
+                    from {exp_users_table}
+                    where
+                        `client` = {client_sql}
+                    and
+                        `segment` = {segment_sql}
+                    and
+                        `segment_hash` = {segment_hash_sql}
+                ) as `eum`
+                on
+                    `sta`.`unified_id` = `eum`.`subscription_join_unified_id`
             ) as `sta`
             on
-                `eut`.`unified_id` = `sta`.`unified_id`
+                `eut`.`unified_id` = `sta`.`exp_unified_id`
             group by
                 `dt`,
                 `variation`,

@@ -481,6 +481,110 @@ def generate_sql_rights_filter(rights_type: str, rights: str) -> str:
     return rights_dict[rights]
 
 
+def _parse_clients_options(clients_options: object):
+    if isinstance(clients_options, str):
+        parsed = _parse_configuration_value(clients_options)
+        return parsed if parsed is not None else clients_options
+    return clients_options
+
+
+def _collect_platform_values(options: object) -> list[object]:
+    if isinstance(options, dict):
+        values = []
+        for key, value in options.items():
+            if str(key).lower() == "platform":
+                values.extend(_flatten_option_values(value))
+            else:
+                values.extend(_collect_platform_values(value))
+        return values
+
+    if isinstance(options, (list, tuple, set)):
+        items = list(options)
+        if len(items) == 2 and str(items[0]).lower() == "platform":
+            return _flatten_option_values(items[1])
+        values = []
+        for value in options:
+            values.extend(_collect_platform_values(value))
+        return values
+
+    return []
+
+
+def _flatten_option_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values = []
+        for nested_value in value.values():
+            values.extend(_flatten_option_values(nested_value))
+        return values
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_flatten_option_values(item))
+        return values
+    return [value]
+
+
+def _text_has_mobweb_marker(value: object) -> bool:
+    text = str(value).lower()
+    return (
+        "mobweb" in text
+        or "mobile_web" in text
+        or "mobile web" in text
+        or "platform > 1" in text
+        or "platform>1" in text
+    )
+
+
+def _platform_values_are_mobweb(platform_values: list[object]) -> bool:
+    if not platform_values:
+        return True
+
+    for value in platform_values:
+        if isinstance(value, (int, float)):
+            if int(value) > 1:
+                return True
+            continue
+
+        text = str(value).strip().lower()
+        if text in {"mobweb", "mobile_web", "mobile web", "mweb"}:
+            return True
+        try:
+            if int(text) > 1:
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
+def is_mobweb_segment(segment: dict, clients_options: object = "", client: str = "UG_WEB") -> bool:
+    platform = str(segment.get("platform", "")).lower()
+    if platform in {"mobweb", "mobile_web", "mobile web", "mweb"}:
+        return True
+    if segment.get("mobweb") is True or segment.get("mobile_web") is True:
+        return True
+
+    segment_sql = json.dumps(segment, sort_keys=True, ensure_ascii=True, default=str).lower()
+    if "platform > 1" in segment_sql or "platform>1" in segment_sql:
+        return True
+
+    parsed_options = _parse_clients_options(clients_options)
+    if isinstance(parsed_options, dict):
+        parsed_options = parsed_options.get(client, {})
+    if _text_has_mobweb_marker(parsed_options):
+        return True
+    return _platform_values_are_mobweb(_collect_platform_values(parsed_options))
+
+
+def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: object = "", insert: bool = False) -> str:
+    suffix = "_insert" if insert else ""
+    if client == "UG_WEB":
+        if is_mobweb_segment(segment, clients_options, client):
+            return f"exp_raw_data_mobweb{suffix}"
+        return f"exp_raw_data_web{suffix}"
+    return f"exp_raw_data_app{suffix}"
+
+
 def get_segment_hash(segment: dict) -> str:
     segment_json = json.dumps(segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
@@ -601,6 +705,25 @@ def _ensure_segment_hash_column(table_name: str, *, config: Optional[ExperimentC
     execute_sql_modify(query)
 
 
+def _ensure_exp_users_extra_columns(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    columns = {
+        "app_unified_id": "Int64 default 0",
+        "has_app": "UInt8 default 0",
+        "subscription_unified_ids": "Array(Int64) default []",
+    }
+    for column_name, column_type in columns.items():
+        if _table_has_column(table_name, column_name):
+            continue
+
+        query = f"""
+            alter table {table_name}
+            on cluster {cfg.cluster}
+            add column if not exists `{column_name}` {column_type}
+        """
+        execute_sql_modify(query)
+
+
 def _delete_exp_users_segment(
     table_name: str,
     client: str,
@@ -631,6 +754,7 @@ def _ensure_exp_users_segment_hash(
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> None:
     _ensure_segment_hash_column(table_name, config=config)
+    _ensure_exp_users_extra_columns(table_name, config=config)
     query = f"""
         select
             count() as `rows_cnt`,
@@ -893,7 +1017,7 @@ def create_experiment_users_table(
             sorting="client, segment, segment_hash, exp_start_dt",
             config=cfg,
         )
-        seed_query_name = "exp_raw_data_web" if "UG_WEB" in exp_info["clients_list"] else "exp_raw_data_app"
+        seed_query_name = exp_raw_data_query_name(client, segment, clients_options=exp_info.get("clients_options", ""))
         seed_query = get_query(
             seed_query_name,
             params={
@@ -929,7 +1053,12 @@ def create_experiment_users_table(
             continue
 
         query_part_1 = f"insert into {full_table_name}"
-        insert_query_name = "exp_raw_data_web_insert" if "UG_WEB" in exp_info["clients_list"] else "exp_raw_data_app_insert"
+        insert_query_name = exp_raw_data_query_name(
+            client,
+            segment,
+            clients_options=exp_info.get("clients_options", ""),
+            insert=True,
+        )
         query_part_2 = get_query(
             insert_query_name,
             params={

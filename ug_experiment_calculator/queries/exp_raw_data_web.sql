@@ -21,12 +21,15 @@ with
 select
     `urew`.`unified_id`,
     `urew`.`experiments.variation`[indexOf(`urew`.`experiments.id`, `exp_id`)] as `variation`,
-    minIf(toUnixTimestamp(`urew`.`datetime`), `urew`.`event` != 'App Install') AS `exp_start_dt`,
-    argMinIf(`urew`.`rights`, `urew`.`datetime`, `urew`.`event` != 'App Install') AS `rights`,
-    argMinIf(`urew`.`user_id`, `urew`.`datetime`, `urew`.`event` != 'App Install') AS `user_id`,
-    argMinIf(`urew`.`item_id`, `urew`.`datetime`, `urew`.`event` = 'App Install') AS `payment_account_id`,
-    argMinIf(`urew`.`country`, `urew`.`datetime`, `urew`.`event` != 'App Install') AS `country`,
-    argMinIf(`urew`.`auth`, `urew`.`datetime`, `urew`.`event` != 'App Install') AS `auth`
+    min(toUnixTimestamp(`urew`.`datetime`)) AS `exp_start_dt`,
+    argMin(`urew`.`rights`, `urew`.`datetime`) AS `rights`,
+    argMin(`urew`.`user_id`, `urew`.`datetime`) AS `user_id`,
+    toUInt32(0) AS `payment_account_id`,
+    argMin(`urew`.`country`, `urew`.`datetime`) AS `country`,
+    argMin(`urew`.`auth`, `urew`.`datetime`) AS `auth`,
+    toInt64(0) AS `app_unified_id`,
+    toUInt8(0) AS `has_app`,
+    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urew`.`unified_id`)])) AS `subscription_unified_ids`
     -- , [('platform', toString(argMin(`urew`.`platform`, `urew`.`datetime`))), ('value', toString(argMin(`urew`.`value`, `urew`.`datetime`)))] as `params`
 from
     `default`.`ug_rt_events_web` as `urew`
@@ -36,10 +39,8 @@ and
     `urew`.`datetime` between toDateTime(tupleElement(exp_data,2)) and if(tupleElement(exp_data,3) < tupleElement(exp_data,2), toDateTime(now()), toDateTime(tupleElement(exp_data,3)))
 and
     `urew`.`unified_id` > 0
-and (
+and
     (where_condition)
-    or `urew`.`event` = 'App Install'
-)
 and
     `variation` > 0
 and
