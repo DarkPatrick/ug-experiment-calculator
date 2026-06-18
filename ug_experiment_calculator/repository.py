@@ -609,6 +609,38 @@ EXP_USERS_COLUMNS = (
 )
 
 
+MOBWEB_WEB_USERS_SCHEMA = """
+(
+    `unified_id` Int64,
+    `variation` UInt32,
+    `exp_start_dt` UInt32,
+    `rights` Int64,
+    `user_id` Int64,
+    `country` String,
+    `auth` UInt8
+)
+"""
+
+MOBWEB_WEB_INSTALLS_SCHEMA = """
+(
+    `unified_id` Int64,
+    `variation` UInt32,
+    `install_payment_account_id` UInt64,
+    `install_dt` DateTime
+)
+"""
+
+MOBWEB_APP_USERS_SCHEMA = """
+(
+    `unified_id` Int64,
+    `variation` UInt32,
+    `app_unified_id` Int64,
+    `app_payment_account_id` UInt64,
+    `app_start_dt` DateTime
+)
+"""
+
+
 def _exp_users_insert_columns_sql() -> str:
     return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
 
@@ -634,6 +666,147 @@ def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_ha
             {query}
         )
     """
+
+
+def _insert_into_table_from_select(
+    full_table_name: str,
+    query_name: str,
+    params: dict,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    query = "insert into " + full_table_name + "\n" + get_query(query_name, params=params, config=config)
+    logger.info("Inserting into %s with query:\n%s", full_table_name, query)
+    execute_sql_modify(query)
+
+
+def _identifier_part(value: object) -> str:
+    text = re.sub(r"[^0-9a-zA-Z_]+", "_", str(value)).strip("_").lower()
+    return text or "empty"
+
+
+def _mobweb_stage_table_name(exp_id: int, client: str, segment_hash: str, current_day: datetime.datetime, stage: str) -> str:
+    return (
+        f"exp_users_{exp_id}_mobweb_"
+        f"{_identifier_part(stage)}_"
+        f"{_identifier_part(client)}_"
+        f"{segment_hash[:12]}_"
+        f"{current_day.strftime('%Y%m%d')}"
+    )
+
+
+def _recreate_mobweb_stage_table(
+    table_name: str,
+    query_name: str,
+    params: dict,
+    *,
+    schema: str,
+    partition: str,
+    sorting: str,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    full_table_name = cfg.full_table(table_name)
+    drop_table(full_table_name, config=cfg)
+    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
+    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
+    execute_sql_modify(query)
+    _insert_into_table_from_select(full_table_name, query_name, params, config=cfg)
+    return full_table_name
+
+
+def _create_mobweb_stage_table(
+    table_name: str,
+    *,
+    schema: str,
+    partition: str,
+    sorting: str,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    cfg = get_config(config)
+    full_table_name = cfg.full_table(table_name)
+    drop_table(full_table_name, config=cfg)
+    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
+    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
+    execute_sql_modify(query)
+    return full_table_name
+
+
+def _insert_mobweb_experiment_users_day(
+    full_table_name: str,
+    exp_info: dict,
+    client: str,
+    segment_name: str,
+    segment_hash: str,
+    current_day: datetime.datetime,
+    where_filter: str,
+    having_filter: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    exp_id = exp_info["id"]
+    common_params = {
+        "exp_id": exp_id,
+        "where_sql": where_filter,
+        "having_sql": having_filter,
+        "date_filter": current_day.strftime("%Y-%m-%d"),
+        "exp_users_table": full_table_name,
+        "client": client,
+        "client_sql": _clickhouse_string_literal(client),
+        "segment_sql": _clickhouse_string_literal(segment_name),
+        "segment_hash_sql": _clickhouse_string_literal(segment_hash),
+    }
+
+    web_users_table = _recreate_mobweb_stage_table(
+        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "web_users"),
+        "exp_raw_data_mobweb_web_users",
+        common_params,
+        schema=MOBWEB_WEB_USERS_SCHEMA,
+        partition="toYYYYMM(toDate(exp_start_dt))",
+        sorting="unified_id, variation",
+        config=cfg,
+    )
+    web_installs_params = common_params | {"web_users_table": web_users_table}
+    web_installs_table = _recreate_mobweb_stage_table(
+        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "web_installs"),
+        "exp_raw_data_mobweb_web_installs",
+        web_installs_params,
+        schema=MOBWEB_WEB_INSTALLS_SCHEMA,
+        partition="toYYYYMM(toDate(install_dt))",
+        sorting="unified_id, variation",
+        config=cfg,
+    )
+    app_users_table = _create_mobweb_stage_table(
+        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "app_users"),
+        schema=MOBWEB_APP_USERS_SCHEMA,
+        partition="toYYYYMM(toDate(app_start_dt))",
+        sorting="unified_id, variation",
+        config=cfg,
+    )
+    exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
+    if exp_info["date_end"] > exp_info["date_start"]:
+        exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
+    app_date = current_day.date()
+    while app_date <= exp_end_dt.date():
+        app_users_params = common_params | {
+            "web_installs_table": web_installs_table,
+            "app_date_filter": app_date.strftime("%Y-%m-%d"),
+        }
+        logger.info("Inserting mobweb app users for app_date=%s", app_date)
+        _insert_into_table_from_select(app_users_table, "exp_raw_data_mobweb_app_users", app_users_params, config=cfg)
+        app_date += datetime.timedelta(days=1)
+
+    final_params = common_params | {
+        "web_users_table": web_users_table,
+        "web_installs_table": web_installs_table,
+        "app_users_table": app_users_table,
+    }
+    query_part_2 = get_query("exp_raw_data_mobweb_insert", params=final_params, config=cfg)
+    query = f"insert into {full_table_name} ({_exp_users_insert_columns_sql()})"
+    query += "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
+    logger.info("Inserting final mobweb experiment users table with query:\n%s", query)
+    execute_sql_modify(query)
 
 
 def _should_insert_exp_users_day(
@@ -1027,6 +1200,7 @@ def create_experiment_users_table(
     table_name = f"exp_users_{exp_id}"
     full_table_name = cfg.full_table(table_name)
     segment_hash = get_segment_hash(segment)
+    is_mobweb = client == "UG_WEB" and is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
 
     where_filter = segment.get("uwf", "1")
     if exp_info["experiment_event_start"] == "App Experiment Start":
@@ -1050,7 +1224,11 @@ def create_experiment_users_table(
             sorting="client, segment, segment_hash, exp_start_dt",
             config=cfg,
         )
-        seed_query_name = exp_raw_data_query_name(client, segment, clients_options=exp_info.get("clients_options", ""))
+        seed_query_name = (
+            "exp_raw_data_mobweb_schema"
+            if is_mobweb
+            else exp_raw_data_query_name(client, segment, clients_options=exp_info.get("clients_options", ""))
+        )
         seed_query = get_query(
             seed_query_name,
             params={
@@ -1082,6 +1260,20 @@ def create_experiment_users_table(
                 client,
                 segment_name,
                 current_day.strftime("%Y-%m-%d"),
+            )
+            continue
+
+        if is_mobweb:
+            _insert_mobweb_experiment_users_day(
+                full_table_name,
+                exp_info,
+                client,
+                segment_name,
+                segment_hash,
+                current_day,
+                where_filter,
+                having_filter,
+                config=cfg,
             )
             continue
 
