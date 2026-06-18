@@ -242,6 +242,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "lifetime_arpu_var",
         "arppu_var",
         "subscriptions_per_user_var",
+        "charges_per_user_var",
         "value",
         "conversion",
     ]

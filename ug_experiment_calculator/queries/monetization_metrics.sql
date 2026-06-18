@@ -87,6 +87,7 @@
         uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400) as `buyer_cnt`,
         uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0) as `subscription_charge_cnt`,
         `subscription_charge_cnt` + `access_otp_cnt` as `charge_cnt`,
+        any(`cpu`.`charges_per_user_var`) as `charges_per_user_var`,
         uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600) as `refund_14d_cnt`,
         uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`charge_dt` > toUnixTimestamp(now()) - 1209600) as `pending_14d_charge_cnt`,
         coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400), 0)
@@ -223,6 +224,78 @@
         toDate(`eut`.`exp_start_dt`) = `spu`.`dt`
     and
         `eut`.`variation` = `spu`.`variation`
+    left join (
+        select
+            `dt`,
+            `variation`,
+            varSamp(`charges_per_user_cnt`) as `charges_per_user_var`
+        from (
+            select
+                toDate(`eut`.`exp_start_dt`) as `dt`,
+                `eut`.`variation` as `variation`,
+                `eut`.`unified_id` as `unified_id`,
+                uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0)
+                    + uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_otp` = 1) as `charges_per_user_cnt`
+            from (
+                select distinct
+                    *,
+                    if(
+                        empty(`subscription_unified_ids`),
+                        arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                        `subscription_unified_ids`
+                    ) as `subscription_join_unified_ids`
+                from {exp_users_table}
+                where
+                    `client` = {client_sql}
+                and
+                    `segment` = {segment_sql}
+                and
+                    `segment_hash` = {segment_hash_sql}
+            ) as `eut`
+            left join (
+                select distinct
+                    `sta`.*,
+                    `eum`.`exp_unified_id` as `exp_unified_id`
+                from (
+                    select distinct *
+                    from {subscription_table}
+                ) as `sta`
+                inner join (
+                    select distinct
+                        `unified_id` as `exp_unified_id`,
+                        arrayJoin(
+                            if(
+                                empty(`subscription_unified_ids`),
+                                arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`unified_id`), toInt64(`app_unified_id`)])),
+                                `subscription_unified_ids`
+                            )
+                        ) as `subscription_join_unified_id`
+                    from {exp_users_table}
+                    where
+                        `client` = {client_sql}
+                    and
+                        `segment` = {segment_sql}
+                    and
+                        `segment_hash` = {segment_hash_sql}
+                ) as `eum`
+                on
+                    `sta`.`unified_id` = `eum`.`subscription_join_unified_id`
+            ) as `sta`
+            on
+                `eut`.`unified_id` = `sta`.`exp_unified_id`
+            group by
+                `dt`,
+                `variation`,
+                `unified_id`
+        )
+        group by
+            `dt`,
+            `variation`
+    ) as `cpu`
+    on
+        toDate(`eut`.`exp_start_dt`) = `cpu`.`dt`
+    and
+        `eut`.`variation` = `cpu`.`variation`
     group by
         toDate(`eut`.`exp_start_dt`),
         `eut`.`variation`

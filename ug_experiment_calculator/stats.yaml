@@ -5,6 +5,7 @@ members:
   - platforms: ["all"]
   - description: "number of members in experiment"
   - table_position: 1
+
 install_cnt:
   - type: int
   - display_name: "Installs"
@@ -12,6 +13,7 @@ install_cnt:
   - platforms: ["mobile"]
   - description: "number of mobweb members who installed the app"
   - table_position: 2
+
 access_cnt:
   - type: int
   - display_name: "Accesses"
@@ -117,13 +119,21 @@ refund_14d_cnt:
   - description: "number of charges who got refund within 14 days since payment date"
   - table_position: 15
 
+pending_trial_cnt:
+  - type: int
+  - display_name: "Pending Trials"
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of trial subscriptions with payment date after today and not charged yet"
+  - table_position: 16
+
 pending_14d_charge_cnt:
   - type: int
   - display_name: "14d Pending Charges"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charges occured earlier than 14 days ago"
-  - table_position: 16
+  - table_position: 17
 
 active_trial_cnt:
   - type: int
@@ -131,7 +141,7 @@ active_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of trial subscriptions started before experiment"
-  - table_position: 17
+  - table_position: 18
 
 active_charged_trial_cnt:
   - type: int
@@ -139,4 +149,4 @@ active_charged_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charged trial subscriptions started before experiment"
-  - table_position: 18
+  - table_position: 19

@@ -625,6 +625,8 @@ from ug_experiment_calculator import (
 - `build_experiment_confluence_table_code(rows, metrics_yaml_path=...)` - собрать Confluence storage table из готовых строк.
 - `get_experiment_stats_confluence_table_code(...)` - прочитать `ug_exp_stats` и вернуть Confluence storage table для статистик внутри `ui-expand` `Stats`.
 - `build_experiment_stats_confluence_table_code(rows, stats_yaml_path=...)` - собрать Confluence storage table для статистик из готовых строк.
+- `get_rollout_impact_confluence_table_code(...)` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки.
+- `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=...)` - собрать Confluence storage table с оценкой раскатки из готовых строк.
 - `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
 - `get_latest_experiment_summary_tables(...)` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
 - `build_latest_experiment_summary_tables(results_rows, stats_rows, ...)` - собрать latest summary DataFrame из готовых строк.
