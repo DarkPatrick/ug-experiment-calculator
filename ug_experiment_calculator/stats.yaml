@@ -96,7 +96,7 @@ buyer_cnt:
 
 revenue:
   - type: int
-  - display_name: "Revenue"
+  - display_name: "Revenue, $"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "revenue from charges"
