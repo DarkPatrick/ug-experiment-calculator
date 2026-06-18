@@ -590,13 +590,45 @@ def get_segment_hash(segment: dict) -> str:
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
 
 
+EXP_USERS_COLUMNS = (
+    "unified_id",
+    "variation",
+    "exp_start_dt",
+    "rights",
+    "user_id",
+    "payment_account_id",
+    "country",
+    "auth",
+    "client",
+    "segment",
+    "segment_hash",
+    "app_unified_id",
+    "has_app",
+    "subscription_unified_ids",
+)
+
+
+def _exp_users_insert_columns_sql() -> str:
+    return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
+
+
 def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_hash: str) -> str:
     return f"""
         select
-            *,
+            `unified_id`,
+            `variation`,
+            `exp_start_dt`,
+            `rights`,
+            `user_id`,
+            `payment_account_id`,
+            `country`,
+            `auth`,
             {_clickhouse_string_literal(client)} as `client`,
             {_clickhouse_string_literal(segment_name)} as `segment`,
-            {_clickhouse_string_literal(segment_hash)} as `segment_hash`
+            {_clickhouse_string_literal(segment_hash)} as `segment_hash`,
+            `app_unified_id`,
+            `has_app`,
+            `subscription_unified_ids`
         from (
             {query}
         )
@@ -1052,7 +1084,7 @@ def create_experiment_users_table(
             )
             continue
 
-        query_part_1 = f"insert into {full_table_name}"
+        query_part_1 = f"insert into {full_table_name} ({_exp_users_insert_columns_sql()})"
         insert_query_name = exp_raw_data_query_name(
             client,
             segment,
