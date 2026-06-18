@@ -183,7 +183,8 @@ arpu, $:
   - denominator: members
   - percentage: false
   - variance: arpu_var
-  - platforms: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
   - description: "average revenue per user"
 ```
 
@@ -196,15 +197,17 @@ arpu, $:
 | `percentage` | Если `true`, `mean_0`, `mean_1`, `mean_diff`, `ci_low`, `ci_high` умножаются на `100`. |
 | `distribution` | Сейчас используется `bernoulli` для конверсионных метрик без variance-колонки. |
 | `variance` | Колонка дисперсии для revenue/count метрик. |
-| `platforms` | Список платформ, для которых считать метрику. |
+| `sources` | Список источников/клиентов, для которых считать метрику: `UG_WEB`, `UG_IOS`, `UG_ANDROID`, `UGT_ANDROID`, `UGT_IOS`. |
+| `platforms` | Web-platform bucket: `all`, `desktop` (`platform=1`), `mobile` (`platform>1`), `phone` (`platform=2`), `tablet` (`platform=3`). |
 | `description` | Человекочитаемое описание. |
 
 Чтобы добавить новую метрику:
 
 1. Убедиться, что `monetization_metrics.sql` возвращает нужные колонки числителя, знаменателя и, если нужно, дисперсии.
 2. Добавить блок в `metrics.yaml`.
-3. Включить нужные платформы в `platforms`.
-4. Запустить `calculate_exp_info(exp_id)`.
+3. Включить нужные источники в `sources`.
+4. Ограничить web-platform bucket через `platforms`, если метрика не должна считаться для всех.
+5. Запустить `calculate_exp_info(exp_id)`.
 
 Для `distribution: "bernoulli"` дисперсия считается как `p * (1 - p)`. Для остальных метрик нужна `variance`-колонка.
 
@@ -513,7 +516,7 @@ results_df, stats_df = get_latest_experiment_summary_tables(exp_id=123456)
 
 `stats_df` читается из `ug_exp_stats` и содержит строки `client`, `segment`, `metric`, `description`, `variation`, `value`.
 
-Обе таблицы сортируются по `client`, `segment`, `table_position` и variation-полю, все значения возвращаются строками. `results_df` фильтруется и форматируется через `metrics.yaml`, `stats_df` - через `stats.yaml`; строки с `table_position <= 0`, отсутствующие в конфиге или не разрешенные для платформы через `platforms`, не попадают в результат. В колонке `metric` выводится `display_name` из конфига, если он задан. Поле `color` в `results_df` использует ту же p-value раскраску, что Confluence-таблица.
+Обе таблицы сортируются по `client`, `segment`, `table_position` и variation-полю, все значения возвращаются строками. `results_df` фильтруется и форматируется через `metrics.yaml`, `stats_df` - через `stats.yaml`; строки с `table_position <= 0`, отсутствующие в конфиге или не разрешенные для источника через `sources`, не попадают в результат. В колонке `metric` выводится `display_name` из конфига, если он задан. Поле `color` в `results_df` использует ту же p-value раскраску, что Confluence-таблица.
 
 Из готовых строк:
 
@@ -583,8 +586,8 @@ from ug_experiment_calculator import (
 - `calc_cumulative_aggregates(df)` - накопленные агрегаты по датам и вариациям.
 - `calc_metrics_stats_by_variation_pairs(cumulative_df, metrics_yaml_path, control_variation=1, client="")` - pairwise-статистика метрик.
 - `calc_stats(...)` - низкоуровневый расчет p-value, Cohen's d и confidence interval.
-- `metric_columns_for_client(metrics_yaml_path, client)` - колонки из `metrics.yaml`, нужные платформе.
-- `stats_columns_for_client(stats_yaml_path, client)` - колонки из `stats.yaml`, нужные платформе для записи в `ug_exp_stats`.
+- `metric_columns_for_client(metrics_yaml_path, client, segment=..., clients_options=...)` - колонки из `metrics.yaml`, нужные источнику и web-platform bucket.
+- `stats_columns_for_client(stats_yaml_path, client, segment=..., clients_options=...)` - колонки из `stats.yaml`, нужные источнику и web-platform bucket для записи в `ug_exp_stats`.
 
 ### Графики
 

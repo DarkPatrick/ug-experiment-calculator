@@ -187,13 +187,133 @@ def normalize_metric_config(metric_items: list[dict]) -> dict:
     return config
 
 
-def metric_columns_for_client(metrics_yaml_path: str | Path, client: str) -> set[str]:
+def _parse_config_value(value: object) -> object:
+    if isinstance(value, str):
+        for parser in (yaml.safe_load,):
+            try:
+                parsed = parser(value)
+            except Exception:
+                continue
+            if parsed is not None:
+                return parsed
+    return value
+
+
+def _flatten_option_values(value: object) -> list[object]:
+    if isinstance(value, dict):
+        values = []
+        for nested_value in value.values():
+            values.extend(_flatten_option_values(nested_value))
+        return values
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_flatten_option_values(item))
+        return values
+    return [value]
+
+
+def _collect_platform_values(options: object) -> list[object]:
+    if isinstance(options, dict):
+        values = []
+        for key, value in options.items():
+            if str(key).lower() == "platform":
+                values.extend(_flatten_option_values(value))
+            else:
+                values.extend(_collect_platform_values(value))
+        return values
+
+    if isinstance(options, (list, tuple, set)):
+        items = list(options)
+        if len(items) == 2 and str(items[0]).lower() == "platform":
+            return _flatten_option_values(items[1])
+        values = []
+        for value in options:
+            values.extend(_collect_platform_values(value))
+        return values
+
+    return []
+
+
+def platform_buckets_for_context(client: str, segment: dict | None = None, clients_options: object = "") -> set[str]:
+    if client != "UG_WEB":
+        return {"all"}
+
+    segment = segment or {}
+    explicit_platform = segment.get("platform")
+    if explicit_platform is not None:
+        platform_values = _flatten_option_values(explicit_platform)
+    else:
+        parsed_options = _parse_config_value(clients_options)
+        if isinstance(parsed_options, dict):
+            parsed_options = parsed_options.get(client, {})
+        platform_values = _collect_platform_values(parsed_options)
+
+    if not platform_values:
+        return {"mobile"}
+
+    result = set()
+    for value in platform_values:
+        text = str(value).strip().lower()
+        if text in {"all"}:
+            result.add("all")
+        elif text in {"desktop", "web"}:
+            result.add("desktop")
+        elif text in {"mobile", "mobweb", "mobile_web", "mobile web", "mweb"}:
+            result.add("mobile")
+        elif text in {"phone"}:
+            result.update({"mobile", "phone"})
+        elif text in {"tablet"}:
+            result.update({"mobile", "tablet"})
+        else:
+            try:
+                platform_id = int(text)
+            except ValueError:
+                continue
+            if platform_id == 1:
+                result.add("desktop")
+            elif platform_id == 2:
+                result.update({"mobile", "phone"})
+            elif platform_id == 3:
+                result.update({"mobile", "tablet"})
+            elif platform_id > 1:
+                result.add("mobile")
+
+    return result or {"mobile"}
+
+
+def config_enabled_for_context(
+    config: dict,
+    client: str,
+    *,
+    segment: dict | None = None,
+    clients_options: object = "",
+) -> bool:
+    sources = config.get("sources", config.get("platforms", []))
+    if sources and client not in sources:
+        return False
+
+    platforms = config.get("platforms", ["all"])
+    if "all" in platforms:
+        return True
+
+    current_platforms = platform_buckets_for_context(client, segment=segment, clients_options=clients_options)
+    return bool(current_platforms.intersection(set(platforms)))
+
+
+def metric_columns_for_client(
+    metrics_yaml_path: str | Path,
+    client: str,
+    *,
+    segment: dict | None = None,
+    clients_options: object = "",
+) -> set[str]:
     metrics_config = load_metrics_config(metrics_yaml_path)
     columns = set()
 
     for metric_items in metrics_config.values():
         metric_config = normalize_metric_config(metric_items)
-        if client not in metric_config.get("platforms", []):
+        if not config_enabled_for_context(metric_config, client, segment=segment, clients_options=clients_options):
             continue
 
         for key in ("numerator", "denominator", "variance"):
@@ -204,7 +324,13 @@ def metric_columns_for_client(metrics_yaml_path: str | Path, client: str) -> set
     return columns
 
 
-def stats_columns_for_client(stats_yaml_path: str | Path, client: str) -> set[str]:
+def stats_columns_for_client(
+    stats_yaml_path: str | Path,
+    client: str,
+    *,
+    segment: dict | None = None,
+    clients_options: object = "",
+) -> set[str]:
     stats_config = load_metrics_config(stats_yaml_path)
     columns = set()
 
@@ -214,8 +340,7 @@ def stats_columns_for_client(stats_yaml_path: str | Path, client: str) -> set[st
         if table_position <= 0:
             continue
 
-        platforms = stat_config.get("platforms", [])
-        if platforms and client not in platforms:
+        if not config_enabled_for_context(stat_config, client, segment=segment, clients_options=clients_options):
             continue
 
         columns.add(str(stat_name))
@@ -398,6 +523,8 @@ def calc_metrics_stats_by_variation_pairs(
     metrics_yaml_path: str | Path,
     control_variation: int = 1,
     client: str = "",
+    segment: dict | None = None,
+    clients_options: object = "",
 ) -> pd.DataFrame:
     df = cumulative_df.copy()
     df["dt"] = pd.to_datetime(df["dt"])
@@ -414,8 +541,7 @@ def calc_metrics_stats_by_variation_pairs(
         variance_col = metric_config.get("variance")
         distribution = metric_config.get("distribution")
         is_percentage = metric_config.get("percentage", False)
-        calc_platform = metric_config.get("platforms", [])
-        if client not in calc_platform:
+        if not config_enabled_for_context(metric_config, client, segment=segment, clients_options=clients_options):
             continue
 
         required_cols = {"dt", "variation", numerator_col, denominator_col}

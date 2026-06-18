@@ -54,7 +54,7 @@ class _SummaryItemConfig:
     display_name: str
     description: str
     table_position: int
-    platforms: tuple[str, ...]
+    sources: tuple[str, ...]
     prefix: str = ""
     suffix: str = ""
     value_type: str = ""
@@ -344,7 +344,7 @@ def _load_summary_item_configs(yaml_path: str | Path) -> dict[str, _SummaryItemC
             display_name=str(item_config.get("display_name") or source_name),
             description=str(item_config.get("description") or ""),
             table_position=table_position,
-            platforms=tuple(str(platform) for platform in item_config.get("platforms", [])),
+            sources=tuple(str(source) for source in item_config.get("sources", item_config.get("platforms", []))),
             prefix=str(item_config.get("prefix") or ""),
             suffix=str(item_config.get("suffix") or ""),
             value_type=str(item_config.get("type") or ""),
@@ -401,7 +401,7 @@ def _filter_configured_rows(df: pd.DataFrame, configs: dict[str, _SummaryItemCon
         config = configs.get(str(row["metric"]))
         if config is None:
             continue
-        if config.platforms and str(row["client"]) not in config.platforms:
+        if config.sources and str(row["client"]) not in config.sources:
             continue
         rows.append(row)
 

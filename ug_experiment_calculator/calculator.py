@@ -205,9 +205,16 @@ def calculate_exp_info(
                 metrics_yaml_path=cfg.metrics_yaml_path,
                 control_variation=1,
                 client=client,
+                segment=segment,
+                clients_options=exp_info.get("clients_options", ""),
             )
 
-            stats_metric_columns = stats_columns_for_client(cfg.stats_yaml_path, client)
+            stats_metric_columns = stats_columns_for_client(
+                cfg.stats_yaml_path,
+                client,
+                segment=segment,
+                clients_options=exp_info.get("clients_options", ""),
+            )
             stats_metric_columns = [col for col in df_cum_agg.columns if col in stats_metric_columns]
             df_cum_agg = df_cum_agg[["dt", "variation", *stats_metric_columns]]
             df_cum_agg = df_cum_agg.melt(id_vars=["dt", "variation"], var_name="metric", value_name="value")
