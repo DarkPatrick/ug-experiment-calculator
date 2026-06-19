@@ -15,11 +15,12 @@ select
     `user_id`,
     `unified_id`,
     `payment_account_id`,
+    `payment_account_id_vector`,
     `service_name`,
     `duration_count`,
     `is_otp`,
     now() as `updated_at`,
-    toUInt16(5) as `source_version`
+    toUInt16(6) as `source_version`
 from (
     select
         `subscription_id`,
@@ -41,6 +42,7 @@ from (
         `user_id`,
         `unified_id`,
         `payment_account_id`,
+        `payment_account_id_vector`,
         `service_name`,
         `duration_count`,
         `is_otp`
@@ -74,6 +76,7 @@ from (
             argMinIf(`use`.`user_id`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `user_id`,
             argMinIf(`use`.`unified_id`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `unified_id`,
             argMinIf(`use`.`payment_account_id`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `payment_account_id`,
+            argMinIf(`use`.`payment_account_id_vector`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `payment_account_id_vector`,
             argMinIf(`use`.`service_name`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `service_name`,
             argMinIf(`use`.`duration_count`, `use`.`datetime`, `use`.`event` = 'Subscribed') as `duration_count`,
             if (

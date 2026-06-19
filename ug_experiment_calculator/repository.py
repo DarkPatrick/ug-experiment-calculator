@@ -29,7 +29,7 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 5
+SUBSCRIPTION_SOURCE_VERSION = 6
 
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
@@ -195,6 +195,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "numerator_users",
         "members",
         "install_cnt",
+        "app_referral_tour_cnt",
         "subscriber_cnt",
         "otp_owner_cnt",
         "access_owner_cnt",
@@ -1089,6 +1090,20 @@ def _ensure_next_subscribed_dt_column(table_name: str, *, config: Optional[Exper
     return True
 
 
+def _ensure_payment_account_id_vector_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "payment_account_id_vector"):
+        return False
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `payment_account_id_vector` Array(UInt32) default [] after `payment_account_id`
+    """
+    execute_sql_modify(query)
+    return True
+
+
 def _ensure_source_version_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
     if _table_has_column(table_name, "source_version"):
@@ -1165,6 +1180,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
     else:
         _ensure_updated_at_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
+        needs_full_refresh = _ensure_payment_account_id_vector_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_source_version_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _has_stale_source_version(cfg.subscriptions_table, config=cfg) or needs_full_refresh
 

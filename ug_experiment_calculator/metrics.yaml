@@ -46,6 +46,18 @@ members -> install, %:
   - positive: 1
   - suffix: "%"
 
+members -> referral tour, %:
+  - numerator: app_referral_tour_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "conversion rate from users in mobweb to users linked to app referral tour"
+  - table_position: 5
+  - positive: 1
+  - suffix: "%"
+
 members -> subscribers, %:
   - numerator: subscriber_cnt
   - denominator: members
@@ -54,7 +66,7 @@ members -> subscribers, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from members to subscribers"
-  - table_position: 5
+  - table_position: 6
   - positive: 1
   - suffix: "%"
 
@@ -66,7 +78,7 @@ members -> buyers, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from members to buyers"
-  - table_position: 6
+  - table_position: 7
   - positive: 1
   - suffix: "%"
 
@@ -78,7 +90,7 @@ subscriptions per user:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "average number of subscriptions per user"
-  - table_position: 7
+  - table_position: 8
   - positive: 1
 
 charges per user:
@@ -89,7 +101,7 @@ charges per user:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "average number of charges per user"
-  - table_position: 8
+  - table_position: 9
   - positive: 1
 
 trials share, %:
@@ -100,7 +112,7 @@ trials share, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of trials among subscriptions"
-  - table_position: 9
+  - table_position: 10
   - positive: 1
   - suffix: "%"
 
@@ -112,7 +124,7 @@ trial -> charge, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
-  - table_position: 10
+  - table_position: 11
   - positive: 1
   - suffix: "%"
 
@@ -124,7 +136,7 @@ trial -> any charge, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
-  - table_position: 11
+  - table_position: 12
   - positive: 1
   - suffix: "%"
 
@@ -136,7 +148,7 @@ churn 14d, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of charges who churned within 14 days since payment date"
-  - table_position: 12
+  - table_position: 13
   - positive: 0
   - suffix: "%"
 
@@ -148,7 +160,7 @@ refund 14d, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of charges who got refund within 14 days since payment date"
-  - table_position: 13
+  - table_position: 14
   - positive: 0
   - suffix: "%"
 

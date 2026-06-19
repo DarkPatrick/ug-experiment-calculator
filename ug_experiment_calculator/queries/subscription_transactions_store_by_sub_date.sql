@@ -26,7 +26,7 @@ select
         arrayEnumerate(`all_charges_arr`)
     ) as `all_charges_arr_uniq`,
     now() as `updated_at`,
-    toUInt16(5) as `source_version`
+    toUInt16(6) as `source_version`
 from (
     select
         `sub`.`subscription_id` as `subscription_id`,

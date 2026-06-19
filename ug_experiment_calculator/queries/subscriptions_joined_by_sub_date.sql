@@ -45,6 +45,7 @@ from (
         `use`.`user_id` as `user_id`,
         `use`.`unified_id` as `unified_id`,
         `use`.`payment_account_id` as `payment_account_id`,
+        `use`.`payment_account_id_vector` as `payment_account_id_vector`,
         `use`.`service_name` as `service_name`,
         `use`.`duration_count` as `duration_count`,
         `use`.`is_otp` as `is_otp`,
