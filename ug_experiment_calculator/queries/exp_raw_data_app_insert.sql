@@ -29,7 +29,23 @@ select
     argMin(`urea`.`auth`, `urea`.`datetime`) AS `auth`,
     toInt64(0) AS `app_unified_id`,
     toUInt8(1) AS `has_app`,
-    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urea`.`unified_id`)])) AS `subscription_unified_ids`
+    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urea`.`unified_id`)])) AS `subscription_unified_ids`,
+    multiIf(lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))) in ('android', 'ios', 'os x', 'windows'), lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))), '( Other )') AS `os`,
+    '' AS `browser`,
+    cast([], 'Array(UInt32)') AS `frontend_release_version`,
+    cast([], 'Array(UInt32)') AS `backend_release_version`,
+    if(empty(toString(argMin(`urea`.`app_version`, `urea`.`datetime`))), cast([], 'Array(UInt32)'), arrayMap(x -> toUInt32OrZero(x), splitByChar('.', toString(argMin(`urea`.`app_version`, `urea`.`datetime`))))) AS `web_version`,
+    toInt64OrZero(toString(argMin(`urea`.`platform`, `urea`.`datetime`))) AS `platform`,
+    toString(argMin(`urea`.`type`, `urea`.`datetime`)) AS `type`,
+    toUInt8(toDate(toDateTime(intDiv(toInt64(`urea`.`unified_id`), 1000000000)), 'UTC') = `date_filter`) AS `is_new`,
+    toString(argMin(`urea`.`connection`, `urea`.`datetime`)) AS `connection`,
+    multiIf(
+        lower(toString(argMin(`urea`.`device_manufacturer`, `urea`.`datetime`))) = 'apple', 'Apple',
+        lower(toString(argMin(`urea`.`device_manufacturer`, `urea`.`datetime`))) = 'samsung', 'samsung',
+        lower(toString(argMin(`urea`.`device_manufacturer`, `urea`.`datetime`))) = 'xiaomi', 'Xiaomi',
+        lower(toString(argMin(`urea`.`device_manufacturer`, `urea`.`datetime`))) = 'google', 'Google',
+        '( Other )'
+    ) AS `device_manufacturer`
     -- , [('platform', toString(argMin(`urea`.`platform`, `urea`.`datetime`))), ('value', toString(argMin(`urea`.`value`, `urea`.`datetime`)))] as `params`
 from
     `default`.`ug_rt_events_app` as `urea`

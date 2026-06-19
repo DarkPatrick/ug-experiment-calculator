@@ -9,4 +9,14 @@ select
     toUInt8(0) as `auth`,
     toInt64(0) as `app_unified_id`,
     toUInt8(0) as `has_app`,
-    cast([], 'Array(Int64)') as `subscription_unified_ids`
+    cast([], 'Array(Int64)') as `subscription_unified_ids`,
+    toString('') as `os`,
+    toString('') as `browser`,
+    cast([], 'Array(UInt32)') as `frontend_release_version`,
+    cast([], 'Array(UInt32)') as `backend_release_version`,
+    cast([], 'Array(UInt32)') as `web_version`,
+    toInt64(0) as `platform`,
+    toString('') as `type`,
+    toUInt8(0) as `is_new`,
+    toString('') as `connection`,
+    toString('') as `device_manufacturer`

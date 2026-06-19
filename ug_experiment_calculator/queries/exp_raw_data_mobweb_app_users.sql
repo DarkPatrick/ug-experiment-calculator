@@ -32,7 +32,7 @@ on
 where
     `urea`.`date` = `app_date_filter`
 and
-    `urea`.`datetime` between `wi`.`install_dt` and `exp_end_dt`
+    `urea`.`datetime` between `wi`.`install_dt` - interval 5 minute and `exp_end_dt`
 and
     `urea`.`unified_id` > 0
 and

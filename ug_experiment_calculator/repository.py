@@ -606,6 +606,16 @@ EXP_USERS_COLUMNS = (
     "app_unified_id",
     "has_app",
     "subscription_unified_ids",
+    "os",
+    "browser",
+    "frontend_release_version",
+    "backend_release_version",
+    "web_version",
+    "platform",
+    "type",
+    "is_new",
+    "connection",
+    "device_manufacturer",
 )
 
 
@@ -617,7 +627,17 @@ MOBWEB_WEB_USERS_SCHEMA = """
     `rights` Int64,
     `user_id` Int64,
     `country` String,
-    `auth` UInt8
+    `auth` UInt8,
+    `os` String,
+    `browser` String,
+    `frontend_release_version` Array(UInt32),
+    `backend_release_version` Array(UInt32),
+    `web_version` Array(UInt32),
+    `platform` Int64,
+    `type` String,
+    `is_new` UInt8,
+    `connection` String,
+    `device_manufacturer` String
 )
 """
 
@@ -661,7 +681,17 @@ def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_ha
             {_clickhouse_string_literal(segment_hash)} as `segment_hash`,
             `app_unified_id`,
             `has_app`,
-            `subscription_unified_ids`
+            `subscription_unified_ids`,
+            `os`,
+            `browser`,
+            `frontend_release_version`,
+            `backend_release_version`,
+            `web_version`,
+            `platform`,
+            `type`,
+            `is_new`,
+            `connection`,
+            `device_manufacturer`
         from (
             {query}
         )
@@ -898,10 +928,10 @@ def _table_has_column(table_name: str, column_name: str) -> bool:
     return int(df["columns_cnt"].iloc[0] or 0) > 0
 
 
-def _ensure_segment_hash_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+def _ensure_segment_hash_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
     if _table_has_column(table_name, "segment_hash"):
-        return
+        return False
 
     query = f"""
         alter table {table_name}
@@ -909,14 +939,26 @@ def _ensure_segment_hash_column(table_name: str, *, config: Optional[ExperimentC
         add column if not exists `segment_hash` String default ''
     """
     execute_sql_modify(query)
+    return True
 
 
-def _ensure_exp_users_extra_columns(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+def _ensure_exp_users_extra_columns(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
+    columns_added = False
     columns = {
         "app_unified_id": "Int64 default 0",
         "has_app": "UInt8 default 0",
         "subscription_unified_ids": "Array(Int64) default []",
+        "os": "String default ''",
+        "browser": "String default ''",
+        "frontend_release_version": "Array(UInt32) default []",
+        "backend_release_version": "Array(UInt32) default []",
+        "web_version": "Array(UInt32) default []",
+        "platform": "Int64 default 0",
+        "type": "String default ''",
+        "is_new": "UInt8 default 0",
+        "connection": "String default ''",
+        "device_manufacturer": "String default ''",
     }
     for column_name, column_type in columns.items():
         if _table_has_column(table_name, column_name):
@@ -928,6 +970,8 @@ def _ensure_exp_users_extra_columns(table_name: str, *, config: Optional[Experim
             add column if not exists `{column_name}` {column_type}
         """
         execute_sql_modify(query)
+        columns_added = True
+    return columns_added
 
 
 def _delete_exp_users_segment(
@@ -959,8 +1003,8 @@ def _ensure_exp_users_segment_hash(
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> None:
-    _ensure_segment_hash_column(table_name, config=config)
-    _ensure_exp_users_extra_columns(table_name, config=config)
+    columns_added = _ensure_segment_hash_column(table_name, config=config)
+    columns_added = _ensure_exp_users_extra_columns(table_name, config=config) or columns_added
     query = f"""
         select
             count() as `rows_cnt`,
@@ -974,6 +1018,16 @@ def _ensure_exp_users_segment_hash(
     df = execute_sql(query)
     rows_cnt = int(df["rows_cnt"].iloc[0] or 0)
     mismatched_rows_cnt = int(df["mismatched_rows_cnt"].iloc[0] or 0)
+    if columns_added and rows_cnt > 0:
+        logger.info(
+            "Experiment users schema changed for client=%s, segment=%s: deleting %s cached rows",
+            client,
+            segment_name,
+            rows_cnt,
+        )
+        _delete_exp_users_segment(table_name, client, segment_name, config=config)
+        return
+
     if rows_cnt == 0 or mismatched_rows_cnt == 0:
         return
 

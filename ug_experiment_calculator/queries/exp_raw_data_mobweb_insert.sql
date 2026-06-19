@@ -9,7 +9,17 @@ select
     `wu`.`auth` as `auth`,
     ifNull(`au`.`app_unified_id`, 0) as `app_unified_id`,
     toUInt8(ifNull(`au`.`app_unified_id`, 0) > 0) as `has_app`,
-    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`wu`.`unified_id`), toInt64(ifNull(`au`.`app_unified_id`, 0))])) as `subscription_unified_ids`
+    arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`wu`.`unified_id`), toInt64(ifNull(`au`.`app_unified_id`, 0))])) as `subscription_unified_ids`,
+    `wu`.`os` as `os`,
+    `wu`.`browser` as `browser`,
+    `wu`.`frontend_release_version` as `frontend_release_version`,
+    `wu`.`backend_release_version` as `backend_release_version`,
+    `wu`.`web_version` as `web_version`,
+    `wu`.`platform` as `platform`,
+    `wu`.`type` as `type`,
+    `wu`.`is_new` as `is_new`,
+    `wu`.`connection` as `connection`,
+    `wu`.`device_manufacturer` as `device_manufacturer`
 from
     {web_users_table} as `wu`
 left join
