@@ -11,6 +11,7 @@
 - Создавать и переиспользовать ClickHouse-таблицу пользователей эксперимента `exp_users_{exp_id}`.
 - Поддерживать локальные ClickHouse-кэши подписок `subscriptions` и `subscriptions_transactions`.
 - Считать monetization-метрики из `metrics.yaml`.
+- Считать web/app retention D1/D7/D14 по 15-дневному окну событий после попадания пользователя в эксперимент.
 - Считать накопленные значения метрик по дням и вариациям.
 - Считать pairwise-статистику для пар `1 vs N`: `mean_0`, `mean_1`, `mean_diff`, `lift`, `ci_low`, `ci_high`, `pvalue`.
 - Считать funnel-агрегаты и pairwise-статистику для воронок из `funnels.yaml`.
@@ -97,11 +98,12 @@ calculate_exp_info(123456, config=config)
 4. Для каждой пары `(client, segment)` создает или обновляет таблицу пользователей `exp_users_{exp_id}`.
 5. Создает временную таблицу подписок `exp_subscription_{exp_id}_{session_id}`.
 6. Читает monetization-агрегаты через `monetization_metrics.sql`.
-7. Читает и считает воронки, разрешенные для текущей платформы.
-8. Считает накопленные агрегаты по метрикам и воронкам.
-9. Считает pairwise-статистику, где контрольная вариация всегда `1`.
-10. Перезаписывает партиции текущего `exp_id/client/segment` в результирующих таблицах.
-11. Удаляет временную таблицу подписок.
+7. Читает retention-агрегаты через `retention_metrics.sql` и подмешивает их к обычным метрикам.
+8. Читает и считает воронки, разрешенные для текущей платформы.
+9. Считает накопленные агрегаты по метрикам и воронкам.
+10. Считает pairwise-статистику, где контрольная вариация всегда `1`.
+11. Перезаписывает партиции текущего `exp_id/client/segment` в результирующих таблицах.
+12. Удаляет временную таблицу подписок.
 
 Если таблица результата еще не существует, она создается по схеме датафрейма. Если существует, пакет удаляет только партиции текущего эксперимента, платформы и сегмента, а затем вставляет свежие строки.
 
@@ -199,6 +201,7 @@ arpu, $:
 | `variance` | Колонка дисперсии для revenue/count метрик. |
 | `sources` | Список источников/клиентов, для которых считать метрику: `UG_WEB`, `UG_IOS`, `UG_ANDROID`, `UGT_ANDROID`, `UGT_IOS`. |
 | `platforms` | Web-platform bucket: `all`, `desktop` (`platform=1`), `mobile` (`platform>1`), `phone` (`platform=2`), `tablet` (`platform=3`). |
+| `domain` | Группа для генераторов таблиц и графиков: `monetization` или `product`. Если поле отсутствует, используется `monetization`. |
 | `description` | Человекочитаемое описание. |
 
 Чтобы добавить новую метрику:
@@ -210,6 +213,22 @@ arpu, $:
 5. Запустить `calculate_exp_info(exp_id)`.
 
 Для `distribution: "bernoulli"` дисперсия считается как `p * (1 - p)`. Для остальных метрик нужна `variance`-колонка.
+
+### Retention-метрики
+
+Retention считается отдельным SQL-шаблоном `retention_metrics.sql` поверх уже собранной таблицы `exp_users_{exp_id}`. Для каждого дня попадания в эксперимент берется окно событий до `dt + 15 days`, а D1/D7/D14 считаются как пользователи с return-событием в интервалах `24-48`, `24-192` и `24-360` часов от `exp_start_dt`.
+
+Все retention-метрики и retention-статистики размечены `domain: "product"`. Остальные метрики и статистики размечены `domain: "monetization"`. Генераторы таблиц и графиков по умолчанию используют `domain="monetization"`; для продуктового блока передайте `domain="product"`.
+
+Return-события:
+
+| Платформа | События | Метрики |
+| --- | --- | --- |
+| Web | `Tab View`, `Home View` | `web retention 1d/7d/14d, %` |
+| App | `Tab Open`, `App Start`, `Courses Open`, `Shots Open`, `Tabs Open` | `app retention 1d/7d/14d, %` |
+| Mobweb | оба набора событий | web retention и отдельный `mobweb app retention 1d/7d/14d, %` |
+
+Внутри одного запуска retention не пересчитывается для сегментов с одинаковыми user-условиями: кэш-ключ строится по raw-user query type, `uwf`, `uhf`, rights-фильтрам и web-platform признакам. Сегменты, отличающиеся только subscription-фильтрами `swf/shf`, переиспользуют один retention-агрегат.
 
 ## Воронки
 
@@ -406,6 +425,7 @@ from ug_experiment_calculator import get_experiment_confluence_table_code
 
 table_code = get_experiment_confluence_table_code(
     exp_id=123456,
+    domain="monetization",
     thousands_separator=True,
 )
 ```
@@ -445,6 +465,7 @@ from ug_experiment_calculator import build_experiment_confluence_table_code
 table_code = build_experiment_confluence_table_code(
     rows,
     metrics_yaml_path="ug_experiment_calculator/metrics.yaml",
+    domain="monetization",
     thousands_separator=True,
 )
 ```
@@ -458,6 +479,7 @@ from ug_experiment_calculator import get_experiment_stats_confluence_table_code
 
 stats_table_code = get_experiment_stats_confluence_table_code(
     exp_id=123456,
+    domain="monetization",
     thousands_separator=True,
 )
 ```
@@ -479,6 +501,7 @@ from ug_experiment_calculator import build_experiment_stats_confluence_table_cod
 stats_table_code = build_experiment_stats_confluence_table_code(
     rows,
     stats_yaml_path="ug_experiment_calculator/stats.yaml",
+    domain="monetization",
     thousands_separator=True,
 )
 ```
@@ -584,10 +607,10 @@ from ug_experiment_calculator import (
 ```
 
 - `calc_cumulative_aggregates(df)` - накопленные агрегаты по датам и вариациям.
-- `calc_metrics_stats_by_variation_pairs(cumulative_df, metrics_yaml_path, control_variation=1, client="")` - pairwise-статистика метрик.
+- `calc_metrics_stats_by_variation_pairs(cumulative_df, metrics_yaml_path, control_variation=1, client="", domain=None)` - pairwise-статистика метрик.
 - `calc_stats(...)` - низкоуровневый расчет p-value, Cohen's d и confidence interval.
-- `metric_columns_for_client(metrics_yaml_path, client, segment=..., clients_options=...)` - колонки из `metrics.yaml`, нужные источнику и web-platform bucket.
-- `stats_columns_for_client(stats_yaml_path, client, segment=..., clients_options=...)` - колонки из `stats.yaml`, нужные источнику и web-platform bucket для записи в `ug_exp_stats`.
+- `metric_columns_for_client(metrics_yaml_path, client, segment=..., clients_options=..., domain=None)` - колонки из `metrics.yaml`, нужные источнику, web-platform bucket и домену.
+- `stats_columns_for_client(stats_yaml_path, client, segment=..., clients_options=..., domain=None)` - колонки из `stats.yaml`, нужные источнику, web-platform bucket и домену для записи в `ug_exp_stats`.
 
 ### Графики
 
@@ -612,24 +635,24 @@ from ug_experiment_calculator import (
 )
 ```
 
-- `get_metric_echarts_code(...)` - прочитать `ug_exp_results` и вернуть JS для двух ECharts-графиков метрики.
+- `get_metric_echarts_code(..., domain="monetization")` - прочитать `ug_exp_results` и вернуть JS для двух ECharts-графиков метрики.
 - `build_metric_echarts_code(rows, ...)` - собрать JS для ECharts из готовых строк.
 - `build_metric_echarts_options(rows)` - вернуть два ECharts option-объекта.
-- `get_metric_confluence_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative p-value.
+- `get_metric_confluence_chart_code(..., domain="monetization")` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative p-value.
 - `build_metric_confluence_chart_code(rows, metric, ...)` - собрать Confluence Chart macro из готовых строк.
-- `get_metric_confluence_lift_chart_code(...)` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative diff.
+- `get_metric_confluence_lift_chart_code(..., domain="monetization")` - прочитать `ug_exp_results` и вернуть Confluence Chart macro для cumulative diff.
 - `build_metric_confluence_lift_chart_code(rows, metric, ...)` - собрать lift Confluence Chart macro из готовых строк.
-- `get_stat_confluence_chart_code(...)` - прочитать `ug_exp_stats` и вернуть Confluence Chart macro для cumulative-статистики.
+- `get_stat_confluence_chart_code(..., domain="monetization")` - прочитать `ug_exp_stats` и вернуть Confluence Chart macro для cumulative-статистики.
 - `build_stat_confluence_chart_code(rows, metric, ...)` - собрать Confluence Chart macro по `dt`, `variation`, `value`.
-- `get_experiment_confluence_table_code(...)` - прочитать `ug_exp_results` и вернуть Confluence storage table по эксперименту.
-- `build_experiment_confluence_table_code(rows, metrics_yaml_path=...)` - собрать Confluence storage table из готовых строк.
-- `get_experiment_stats_confluence_table_code(...)` - прочитать `ug_exp_stats` и вернуть Confluence storage table для статистик внутри `ui-expand` `Stats`.
-- `build_experiment_stats_confluence_table_code(rows, stats_yaml_path=...)` - собрать Confluence storage table для статистик из готовых строк.
-- `get_rollout_impact_confluence_table_code(...)` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки.
-- `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=...)` - собрать Confluence storage table с оценкой раскатки из готовых строк.
+- `get_experiment_confluence_table_code(..., domain="monetization")` - прочитать `ug_exp_results` и вернуть Confluence storage table по эксперименту.
+- `build_experiment_confluence_table_code(rows, metrics_yaml_path=..., domain="monetization")` - собрать Confluence storage table из готовых строк.
+- `get_experiment_stats_confluence_table_code(..., domain="monetization")` - прочитать `ug_exp_stats` и вернуть Confluence storage table для статистик внутри `ui-expand` `Stats`.
+- `build_experiment_stats_confluence_table_code(rows, stats_yaml_path=..., domain="monetization")` - собрать Confluence storage table для статистик из готовых строк.
+- `get_rollout_impact_confluence_table_code(..., domain="monetization")` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки.
+- `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=..., domain="monetization")` - собрать Confluence storage table с оценкой раскатки из готовых строк.
 - `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
-- `get_latest_experiment_summary_tables(...)` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
-- `build_latest_experiment_summary_tables(results_rows, stats_rows, ...)` - собрать latest summary DataFrame из готовых строк.
+- `get_latest_experiment_summary_tables(..., domain="monetization")` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
+- `build_latest_experiment_summary_tables(results_rows, stats_rows, domain="monetization", ...)` - собрать latest summary DataFrame из готовых строк.
 - `calculate_rollout_share(exp_id, clients=None, segment_name="Total", ...)` - посчитать по дням и client cumulative-долю пользователей эксперимента среди всех пользователей, засплитованных в эксперимент. Первые попадания split-users сохраняются инкрементально по дням в `rollout_split_users_<exp_id>`, а дневные агрегаты - в `ug_exp_rollout_split_users`.
 - `calculate_rollout_impact_estimate(exp_id, clients=None, lookback_days=14, ...)` - оценить дневное число пользователей, на которых повлияет раскатка: среднее daily users за последние N полных дней с теми же client/platform/country filters умножается на финальную `experiment_share`.
 

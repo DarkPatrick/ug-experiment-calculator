@@ -223,6 +223,15 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "upgrade_revenue",
         "cancel_14d_cnt",
         "cancel_1m_cnt",
+        "web_retention_1d_cnt",
+        "web_retention_7d_cnt",
+        "web_retention_14d_cnt",
+        "app_retention_1d_cnt",
+        "app_retention_7d_cnt",
+        "app_retention_14d_cnt",
+        "mobweb_app_retention_1d_cnt",
+        "mobweb_app_retention_7d_cnt",
+        "mobweb_app_retention_14d_cnt",
     ]
 
     float_columns = [
@@ -589,6 +598,24 @@ def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: obje
 
 def get_segment_hash(segment: dict) -> str:
     segment_json = json.dumps(segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
+
+
+def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: object = "") -> str:
+    user_filter_segment = {
+        "query": exp_raw_data_query_name(client, segment, clients_options=clients_options),
+        "uwf": segment.get("uwf", "1"),
+        "uhf": segment.get("uhf", "1"),
+        "pro_rights": str(segment.get("pro_rights", "all")).lower(),
+        "edu_rights": str(segment.get("edu_rights", "all")).lower(),
+        "sing_rights": str(segment.get("sing_rights", "all")).lower(),
+        "practice_rights": str(segment.get("practice_rights", "all")).lower(),
+        "book_rights": str(segment.get("book_rights", "all")).lower(),
+        "platform": segment.get("platform", ""),
+        "mobweb": segment.get("mobweb", False),
+        "mobile_web": segment.get("mobile_web", False),
+    }
+    segment_json = json.dumps(user_filter_segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
 
 
@@ -1450,6 +1477,34 @@ def get_monetization_metrics(
         config=config,
     )
     logger.info("total query:\n%s", query)
+    return execute_sql(query)
+
+
+def get_retention_metrics(
+    exp_users_table: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str = "",
+    *,
+    calculate_app_retention: bool = True,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    is_web_client = client == "UG_WEB"
+    query = get_query(
+        "retention_metrics",
+        params={
+            "exp_users_table": exp_users_table,
+            "client_sql": _clickhouse_string_literal(client),
+            "segment_sql": _clickhouse_string_literal(segment_name),
+            "segment_hash_sql": _clickhouse_string_literal(segment_hash),
+            "app_retention_unified_id_sql": "`app_unified_id`" if is_web_client else "`unified_id`",
+            "calculate_web_retention_sql": "1" if is_web_client else "0",
+            "calculate_app_retention_sql": "1" if calculate_app_retention else "0",
+            "is_web_client_sql": "1" if is_web_client else "0",
+        },
+        config=config,
+    )
+    logger.info("retention query:\n%s", query)
     return execute_sql(query)
 
 

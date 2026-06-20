@@ -1,4 +1,5 @@
 arpu, $:
+  - domain: "monetization"
   - numerator: revenue
   - denominator: members
   - percentage: false
@@ -11,6 +12,7 @@ arpu, $:
   - prefix: "$"
 
 aov, $:
+  - domain: "monetization"
   - numerator: revenue
   - denominator: charge_cnt
   - percentage: false
@@ -23,6 +25,7 @@ aov, $:
   - prefix: "$"
 
 arppu, $:
+  - domain: "monetization"
   - numerator: revenue
   - denominator: buyer_cnt
   - percentage: false
@@ -35,6 +38,7 @@ arppu, $:
   - prefix: "$"
 
 members -> install, %:
+  - domain: "monetization"
   - numerator: install_cnt
   - denominator: members
   - percentage: true
@@ -47,6 +51,7 @@ members -> install, %:
   - suffix: "%"
 
 members -> referral tour, %:
+  - domain: "monetization"
   - numerator: app_referral_tour_cnt
   - denominator: members
   - percentage: true
@@ -59,6 +64,7 @@ members -> referral tour, %:
   - suffix: "%"
 
 members -> subscribers, %:
+  - domain: "monetization"
   - numerator: subscriber_cnt
   - denominator: members
   - percentage: true
@@ -71,6 +77,7 @@ members -> subscribers, %:
   - suffix: "%"
 
 members -> buyers, %:
+  - domain: "monetization"
   - numerator: buyer_cnt
   - denominator: members
   - percentage: true
@@ -83,6 +90,7 @@ members -> buyers, %:
   - suffix: "%"
 
 subscriptions per user:
+  - domain: "monetization"
   - numerator: subscriptions_cnt
   - denominator: members
   - percentage: false
@@ -94,6 +102,7 @@ subscriptions per user:
   - positive: 1
 
 charges per user:
+  - domain: "monetization"
   - numerator: charge_cnt
   - denominator: members
   - percentage: false
@@ -105,6 +114,7 @@ charges per user:
   - positive: 1
 
 trials share, %:
+  - domain: "monetization"
   - numerator: access_trial_cnt
   - denominator: access_cnt
   - percentage: true
@@ -117,6 +127,7 @@ trials share, %:
   - suffix: "%"
 
 trial -> charge, %:
+  - domain: "monetization"
   - numerator: charged_trial_cnt
   - denominator: access_trial_cnt
   - percentage: true
@@ -129,6 +140,7 @@ trial -> charge, %:
   - suffix: "%"
 
 trial -> any charge, %:
+  - domain: "monetization"
   - numerator: any_charged_trial_cnt
   - denominator: access_trial_cnt
   - percentage: true
@@ -141,6 +153,7 @@ trial -> any charge, %:
   - suffix: "%"
 
 churn 14d, %:
+  - domain: "monetization"
   - numerator: cancel_14d_cnt
   - denominator: charge_cnt
   - percentage: true
@@ -153,6 +166,7 @@ churn 14d, %:
   - suffix: "%"
 
 refund 14d, %:
+  - domain: "monetization"
   - numerator: refund_14d_cnt
   - denominator: charge_cnt
   - percentage: true
@@ -165,6 +179,7 @@ refund 14d, %:
   - suffix: "%"
 
 pending 14d charges share, %:
+  - domain: "monetization"
   - numerator: pending_14d_charge_cnt
   - denominator: charge_cnt
   - percentage: true
@@ -177,6 +192,7 @@ pending 14d charges share, %:
   - suffix: "%"
 
 active trial -> charge, %:
+  - domain: "monetization"
   - numerator: active_charged_trial_cnt
   - denominator: active_trial_cnt
   - percentage: true
@@ -189,6 +205,7 @@ active trial -> charge, %:
   - suffix: "%"
 
 pending trials share, %:
+  - domain: "monetization"
   - numerator: pending_trial_cnt
   - denominator: access_trial_cnt
   - percentage: true
@@ -198,4 +215,121 @@ pending trials share, %:
   - description: "share of pending trials due payment date"
   - table_position: 0
   - positive: 0
+  - suffix: "%"
+
+web retention 1d, %:
+  - domain: "product"
+  - numerator: web_retention_1d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "web retention within 24-48 hours since experiment start"
+  - table_position: 18
+  - positive: 1
+  - suffix: "%"
+
+web retention 7d, %:
+  - domain: "product"
+  - numerator: web_retention_7d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "web retention within 24-192 hours since experiment start"
+  - table_position: 19
+  - positive: 1
+  - suffix: "%"
+
+web retention 14d, %:
+  - domain: "product"
+  - numerator: web_retention_14d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "web retention within 24-360 hours since experiment start"
+  - table_position: 20
+  - positive: 1
+  - suffix: "%"
+
+app retention 1d, %:
+  - domain: "product"
+  - numerator: app_retention_1d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "app retention within 24-48 hours since experiment start"
+  - table_position: 21
+  - positive: 1
+  - suffix: "%"
+
+app retention 7d, %:
+  - domain: "product"
+  - numerator: app_retention_7d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "app retention within 24-192 hours since experiment start"
+  - table_position: 22
+  - positive: 1
+  - suffix: "%"
+
+app retention 14d, %:
+  - domain: "product"
+  - numerator: app_retention_14d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "app retention within 24-360 hours since experiment start"
+  - table_position: 23
+  - positive: 1
+  - suffix: "%"
+
+mobweb app retention 1d, %:
+  - domain: "product"
+  - numerator: mobweb_app_retention_1d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "app retention for mobweb members within 24-48 hours since experiment start"
+  - table_position: 24
+  - positive: 1
+  - suffix: "%"
+
+mobweb app retention 7d, %:
+  - domain: "product"
+  - numerator: mobweb_app_retention_7d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "app retention for mobweb members within 24-192 hours since experiment start"
+  - table_position: 25
+  - positive: 1
+  - suffix: "%"
+
+mobweb app retention 14d, %:
+  - domain: "product"
+  - numerator: mobweb_app_retention_14d_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "app retention for mobweb members within 24-360 hours since experiment start"
+  - table_position: 26
+  - positive: 1
   - suffix: "%"

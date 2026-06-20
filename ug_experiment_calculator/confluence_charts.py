@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 from collections.abc import Iterable, Mapping
 from html import escape
+from pathlib import Path
 from typing import Any, Literal, Optional
 
 import numpy as np
@@ -10,6 +11,7 @@ import pandas as pd
 
 from .colors import CHART_COLOR_RGB_VALUES, SIGNIFICANCE_LEVEL_COLOR
 from .config import ExperimentCalculatorConfig
+from .metrics import config_enabled_for_domain, load_metrics_config, normalize_metric_config
 from .value_formatting import format_plain_number
 
 
@@ -36,12 +38,17 @@ def get_metric_confluence_chart_data(
     client: str,
     segment: str,
     *,
+    metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
+    if not _metric_enabled_for_domain(metric, metrics_yaml_path or cfg.metrics_yaml_path, domain=domain):
+        return pd.DataFrame(columns=["metric", "control_variation", "test_variation", "lift", "pvalue", *CONFLUENCE_CHART_BASE_COLUMNS])
+
     query = f"""
         select
             `dt`,
@@ -213,9 +220,19 @@ def get_metric_confluence_chart_code(
     title_placement: Literal["subtitle", "title", "none"] = "subtitle",
     title: str = PVALUE_CHART_SUBTITLE,
     image_format: str = "png",
+    metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
-    rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
+    rows = get_metric_confluence_chart_data(
+        exp_id,
+        metric,
+        client,
+        segment,
+        metrics_yaml_path=metrics_yaml_path,
+        domain=domain,
+        config=config,
+    )
     return build_metric_confluence_chart_code(
         rows,
         metric,
@@ -244,9 +261,19 @@ def get_metric_confluence_lift_chart_code(
     title_placement: Literal["subtitle", "title", "none"] = "subtitle",
     title: str = DIFF_CHART_SUBTITLE,
     image_format: str = "png",
+    metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
-    rows = get_metric_confluence_chart_data(exp_id, metric, client, segment, config=config)
+    rows = get_metric_confluence_chart_data(
+        exp_id,
+        metric,
+        client,
+        segment,
+        metrics_yaml_path=metrics_yaml_path,
+        domain=domain,
+        config=config,
+    )
     return build_metric_confluence_lift_chart_code(
         rows,
         metric,
@@ -266,12 +293,17 @@ def get_stat_confluence_chart_data(
     client: str,
     segment: str,
     *,
+    stats_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
+    if not _metric_enabled_for_domain(metric, stats_yaml_path or cfg.stats_yaml_path, domain=domain):
+        return pd.DataFrame(columns=["metric", "value", *CONFLUENCE_STAT_CHART_BASE_COLUMNS])
+
     query = f"""
         select
             `dt`,
@@ -304,9 +336,19 @@ def get_stat_confluence_chart_code(
     title_placement: Literal["subtitle", "title", "none"] = "subtitle",
     title: str = STAT_CHART_SUBTITLE,
     image_format: str = "png",
+    stats_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
-    rows = get_stat_confluence_chart_data(exp_id, metric, client, segment, config=config)
+    rows = get_stat_confluence_chart_data(
+        exp_id,
+        metric,
+        client,
+        segment,
+        stats_yaml_path=stats_yaml_path,
+        domain=domain,
+        config=config,
+    )
     return build_stat_confluence_chart_code(
         rows,
         metric,
@@ -325,6 +367,14 @@ class _ChartData:
         self.dates = dates
         self.series_names = series_names
         self.values_by_date = values_by_date
+
+
+def _metric_enabled_for_domain(metric: str, yaml_path: str | Path, *, domain: str | None) -> bool:
+    metrics_config = load_metrics_config(yaml_path)
+    metric_items = metrics_config.get(metric)
+    if metric_items is None:
+        return False
+    return config_enabled_for_domain(normalize_metric_config(metric_items), domain)
 
 
 def _prepare_chart_data(

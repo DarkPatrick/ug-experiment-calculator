@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -10,6 +11,7 @@ import pandas as pd
 
 from .config import ExperimentCalculatorConfig
 from .colors import CHART_COLOR_RGB_VALUES
+from .metrics import config_enabled_for_domain, load_metrics_config, normalize_metric_config
 
 
 ECHARTS_COLOR_RGB_VALUES = CHART_COLOR_RGB_VALUES
@@ -33,12 +35,17 @@ def get_metric_echarts_data(
     client: str,
     segment: str,
     *,
+    metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
+    if not _metric_enabled_for_domain(metric, metrics_yaml_path or cfg.metrics_yaml_path, domain=domain):
+        return pd.DataFrame(columns=["metric", *METRIC_RESULT_COLUMNS, "control_variation", "test_variation"])
+
     query = f"""
         select
             `dt`,
@@ -172,10 +179,28 @@ def get_metric_echarts_code(
     *,
     lift_element_id: str = "metric-lift-chart",
     ci_element_id: str = "metric-ci-chart",
+    metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
-    rows = get_metric_echarts_data(exp_id, metric, client, segment, config=config)
+    rows = get_metric_echarts_data(
+        exp_id,
+        metric,
+        client,
+        segment,
+        metrics_yaml_path=metrics_yaml_path,
+        domain=domain,
+        config=config,
+    )
     return build_metric_echarts_code(rows, lift_element_id=lift_element_id, ci_element_id=ci_element_id)
+
+
+def _metric_enabled_for_domain(metric: str, metrics_yaml_path: str | Path, *, domain: str | None) -> bool:
+    metrics_config = load_metrics_config(metrics_yaml_path)
+    metric_items = metrics_config.get(metric)
+    if metric_items is None:
+        return False
+    return config_enabled_for_domain(normalize_metric_config(metric_items), domain)
 
 
 def _prepare_metric_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:

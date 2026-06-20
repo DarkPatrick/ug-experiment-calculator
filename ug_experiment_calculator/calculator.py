@@ -31,7 +31,10 @@ from .repository import (
     get_experiment,
     get_funnel_metrics,
     get_monetization_metrics,
+    get_retention_metrics,
     get_segment_hash,
+    get_user_filters_hash,
+    is_mobweb_segment,
     update_exp_results_table,
     update_subscription_source_tables,
 )
@@ -45,6 +48,34 @@ FUNNEL_DEFINITION_COLUMNS = {
     "funnel_definition_name": "String",
     "funnel_definition_description": "String",
 }
+
+
+RETENTION_COUNT_COLUMNS = [
+    "web_retention_1d_cnt",
+    "web_retention_7d_cnt",
+    "web_retention_14d_cnt",
+    "app_retention_1d_cnt",
+    "app_retention_7d_cnt",
+    "app_retention_14d_cnt",
+    "mobweb_app_retention_1d_cnt",
+    "mobweb_app_retention_7d_cnt",
+    "mobweb_app_retention_14d_cnt",
+]
+
+
+def _merge_retention_metrics(df: pd.DataFrame, retention_df: pd.DataFrame) -> pd.DataFrame:
+    if retention_df.empty:
+        result = df.copy()
+        for column in RETENTION_COUNT_COLUMNS:
+            result[column] = 0
+        return result
+
+    result = df.merge(retention_df, on=["dt", "variation"], how="left")
+    for column in RETENTION_COUNT_COLUMNS:
+        if column not in result.columns:
+            result[column] = 0
+        result[column] = result[column].fillna(0)
+    return result
 
 
 def _replace_exp_output_table(
@@ -99,6 +130,7 @@ def calculate_exp_info(
     df_tot = {}
     stats_df_tot = {}
     df_cum_agg_tot = {}
+    retention_cache = {}
     exp_users_table = ""
     subscription_table = ""
 
@@ -125,6 +157,31 @@ def calculate_exp_info(
                 segment_hash,
                 config=cfg,
             )
+            retention_cache_key = (
+                client,
+                get_user_filters_hash(segment, client=client, clients_options=exp_info.get("clients_options", "")),
+            )
+            if retention_cache_key not in retention_cache:
+                logger.info("Loading retention metrics")
+                retention_cache[retention_cache_key] = get_retention_metrics(
+                    exp_users_table,
+                    client,
+                    segment_name,
+                    segment_hash,
+                    calculate_app_retention=(
+                        client != "UG_WEB"
+                        or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
+                    ),
+                    config=cfg,
+                )
+            else:
+                logger.info(
+                    "Reusing retention metrics for exp_id=%s, client=%s, segment=%s",
+                    exp_id,
+                    client,
+                    segment_name,
+                )
+            df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
             df_tot[(client, segment_name)] = df
 
             logger.info("Loading subscription funnels")

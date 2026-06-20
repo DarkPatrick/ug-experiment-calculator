@@ -21,7 +21,7 @@ from .confluence_charts import (
     build_metric_confluence_lift_chart_code,
     build_stat_confluence_chart_code,
 )
-from .metrics import load_metrics_config, normalize_metric_config
+from .metrics import config_enabled_for_domain, load_metrics_config, normalize_metric_config
 from .rollout import DEFAULT_IMPACT_LOOKBACK_DAYS
 from .value_formatting import (
     apply_number_affixes,
@@ -141,11 +141,12 @@ def get_experiment_confluence_table_code(
     clients: Optional[Sequence[str]] = None,
     segments: Optional[Sequence[str]] = None,
     metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
     thousands_separator: bool = True,
 ) -> str:
     cfg = config or ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
     rows = get_experiment_confluence_table_data(
         exp_id,
         clients=clients,
@@ -156,6 +157,7 @@ def get_experiment_confluence_table_code(
     return build_experiment_confluence_table_code(
         rows,
         metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        domain=domain,
         thousands_separator=thousands_separator,
     )
 
@@ -205,11 +207,12 @@ def get_experiment_stats_confluence_table_code(
     clients: Optional[Sequence[str]] = None,
     segments: Optional[Sequence[str]] = None,
     stats_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     config: Optional[ExperimentCalculatorConfig] = None,
     thousands_separator: bool = True,
 ) -> str:
     cfg = config or ExperimentCalculatorConfig.from_env()
-    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path)
+    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain)
     rows = get_experiment_stats_confluence_table_data(
         exp_id,
         clients=clients,
@@ -220,6 +223,7 @@ def get_experiment_stats_confluence_table_code(
     return build_experiment_stats_confluence_table_code(
         rows,
         stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+        domain=domain,
         thousands_separator=thousands_separator,
     )
 
@@ -232,6 +236,7 @@ def get_rollout_impact_confluence_table_code(
     stats: Optional[Sequence[str]] = None,
     stats_yaml_path: str | Path | None = None,
     metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     lookback_days: int = DEFAULT_IMPACT_LOOKBACK_DAYS,
     date_end: Any = None,
     config: Optional[ExperimentCalculatorConfig] = None,
@@ -242,7 +247,7 @@ def get_rollout_impact_confluence_table_code(
     from .rollout import calculate_rollout_impact_estimate
 
     cfg = config or ExperimentCalculatorConfig.from_env()
-    significance_configs = _rollout_impact_significance_metric_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    significance_configs = _rollout_impact_significance_metric_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
     metric_names = _rollout_impact_significance_metric_names(stats, significance_configs)
     stats_rows = get_experiment_stats_confluence_table_data(
         exp_id,
@@ -280,6 +285,7 @@ def get_rollout_impact_confluence_table_code(
         segment_name=segment_name,
         stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
         metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        domain=domain,
         thousands_separator=thousands_separator,
     )
 
@@ -288,11 +294,12 @@ def build_experiment_confluence_table_code(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
     metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     thousands_separator: bool = True,
 ) -> str:
     df = _prepare_table_rows(rows)
     cfg = ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
 
     if df.empty or not metric_configs:
         return _rollout_impact_table("")
@@ -320,11 +327,12 @@ def build_experiment_stats_confluence_table_code(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
     stats_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     thousands_separator: bool = True,
 ) -> str:
     df = _prepare_stats_table_rows(rows)
     cfg = ExperimentCalculatorConfig.from_env()
-    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path)
+    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain)
 
     if df.empty or not stats_configs:
         return _ui_expand("Stats", _table([]))
@@ -357,14 +365,15 @@ def build_rollout_impact_confluence_table_code(
     segment_name: str = TOTAL_SEGMENT,
     stats_yaml_path: str | Path | None = None,
     metrics_yaml_path: str | Path | None = None,
+    domain: str = "monetization",
     thousands_separator: bool = True,
 ) -> str:
     df = _prepare_stats_table_rows(stats_rows)
     impact_df = _prepare_rollout_impact_rows(impact_rows)
     metric_df = _prepare_rollout_impact_metric_rows(metric_rows)
     cfg = ExperimentCalculatorConfig.from_env()
-    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path)
-    significance_configs = _rollout_impact_significance_metric_configs(metrics_yaml_path or cfg.metrics_yaml_path)
+    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain)
+    significance_configs = _rollout_impact_significance_metric_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
     metric_configs = _rollout_impact_metric_configs(df, stats_configs, stats)
 
     if df.empty or impact_df.empty or not metric_configs:
@@ -911,11 +920,17 @@ def _rollout_impact_significance_metric_names(
     return result
 
 
-def _rollout_impact_significance_metric_configs(metrics_yaml_path: str | Path) -> dict[str, _MetricTableConfig]:
+def _rollout_impact_significance_metric_configs(
+    metrics_yaml_path: str | Path,
+    *,
+    domain: str | None = None,
+) -> dict[str, _MetricTableConfig]:
     metrics_config = load_metrics_config(metrics_yaml_path)
     result: dict[str, _MetricTableConfig] = {}
     for metric_index, (metric_name, metric_items) in enumerate(metrics_config.items()):
         metric_config = normalize_metric_config(metric_items)
+        if not config_enabled_for_domain(metric_config, domain):
+            continue
         numerator = str(metric_config.get("numerator") or "")
         table_position = int(metric_config.get("table_position") or 0)
         if not numerator or table_position <= 0:
@@ -1289,11 +1304,17 @@ def _design_separator_cell(rowspan: int) -> str:
     )
 
 
-def _load_metric_table_configs(metrics_yaml_path: str | Path) -> list[_MetricTableConfig]:
+def _load_metric_table_configs(
+    metrics_yaml_path: str | Path,
+    *,
+    domain: str | None = None,
+) -> list[_MetricTableConfig]:
     metrics_config = load_metrics_config(metrics_yaml_path)
     result = []
     for metric_index, (metric_name, metric_items) in enumerate(metrics_config.items()):
         metric_config = normalize_metric_config(metric_items)
+        if not config_enabled_for_domain(metric_config, domain):
+            continue
         table_position = int(metric_config.get("table_position") or 0)
         if table_position <= 0:
             continue

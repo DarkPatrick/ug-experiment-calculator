@@ -1,4 +1,5 @@
 members:
+  - domain: "monetization"
   - type: int
   - display_name: "Members"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -7,6 +8,7 @@ members:
   - table_position: 1
 
 install_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Installs"
   - sources: ["UG_WEB"]
@@ -15,6 +17,7 @@ install_cnt:
   - table_position: 2
 
 app_referral_tour_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "App Referral Tours"
   - sources: ["UG_WEB"]
@@ -23,6 +26,7 @@ app_referral_tour_cnt:
   - table_position: 3
 
 access_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Accesses"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -31,6 +35,7 @@ access_cnt:
   - table_position: 4
 
 subscriptions_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Subscriptions"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -39,6 +44,7 @@ subscriptions_cnt:
   - table_position: 5
 
 subscriber_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Subscribers"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -47,6 +53,7 @@ subscriber_cnt:
   - table_position: 6
 
 access_instant_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Instant Accesses"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -55,6 +62,7 @@ access_instant_cnt:
   - table_position: 7
 
 access_ex_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "EX Trial Accesses"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -63,6 +71,7 @@ access_ex_trial_cnt:
   - table_position: 8
 
 access_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Trials"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -71,6 +80,7 @@ access_trial_cnt:
   - table_position: 9
 
 charged_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Charged Trials"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -79,6 +89,7 @@ charged_trial_cnt:
   - table_position: 10
 
 any_charged_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Any Charged Trials"
   - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -87,6 +98,7 @@ any_charged_trial_cnt:
   - table_position: 11
 
 charge_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Charges"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -95,6 +107,7 @@ charge_cnt:
   - table_position: 12
 
 buyer_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Buyers"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -103,6 +116,7 @@ buyer_cnt:
   - table_position: 13
 
 revenue:
+  - domain: "monetization"
   - type: int
   - display_name: "Revenue, $"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -112,6 +126,7 @@ revenue:
   - prefix: "$"
 
 cancel_14d_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "14d Cancellations"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -120,6 +135,7 @@ cancel_14d_cnt:
   - table_position: 15
 
 refund_14d_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "14d Refunds"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -128,6 +144,7 @@ refund_14d_cnt:
   - table_position: 16
 
 pending_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Pending Trials"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -136,6 +153,7 @@ pending_trial_cnt:
   - table_position: 17
 
 pending_14d_charge_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "14d Pending Charges"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -144,6 +162,7 @@ pending_14d_charge_cnt:
   - table_position: 18
 
 active_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Active Trials"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
@@ -152,9 +171,91 @@ active_trial_cnt:
   - table_position: 19
 
 active_charged_trial_cnt:
+  - domain: "monetization"
   - type: int
   - display_name: "Active Charged Trials"
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charged trial subscriptions started before experiment"
   - table_position: 20
+
+web_retention_1d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "1d Web Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members retained within 24-48 hours since experiment start"
+  - table_position: 21
+
+web_retention_7d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "7d Web Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members retained within 24-192 hours since experiment start"
+  - table_position: 22
+
+web_retention_14d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "14d Web Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members retained within 24-360 hours since experiment start"
+  - table_position: 23
+
+app_retention_1d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "1d App Retention"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members retained within 24-48 hours since experiment start"
+  - table_position: 24
+
+app_retention_7d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "7d App Retention"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members retained within 24-192 hours since experiment start"
+  - table_position: 25
+
+app_retention_14d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "14d App Retention"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members retained within 24-360 hours since experiment start"
+  - table_position: 26
+
+mobweb_app_retention_1d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "1d Mobweb App Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb members retained in app within 24-48 hours since experiment start"
+  - table_position: 27
+
+mobweb_app_retention_7d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "7d Mobweb App Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb members retained in app within 24-192 hours since experiment start"
+  - table_position: 28
+
+mobweb_app_retention_14d_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "14d Mobweb App Retention"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb members retained in app within 24-360 hours since experiment start"
+  - table_position: 29
