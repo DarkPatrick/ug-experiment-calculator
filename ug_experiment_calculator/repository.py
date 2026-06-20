@@ -232,6 +232,39 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "mobweb_app_retention_1d_cnt",
         "mobweb_app_retention_7d_cnt",
         "mobweb_app_retention_14d_cnt",
+        "web_tab_view_60s_user_cnt",
+        "web_tab_view_120s_user_cnt",
+        "web_tab_view_180s_user_cnt",
+        "web_tab_view_300s_user_cnt",
+        "web_tab_view_600s_user_cnt",
+        "web_tab_view_events_cnt",
+        "web_tab_view_60s_events_cnt",
+        "web_tab_view_120s_events_cnt",
+        "web_tab_view_180s_events_cnt",
+        "web_tab_view_300s_events_cnt",
+        "web_tab_view_600s_events_cnt",
+        "app_tab_view_60s_user_cnt",
+        "app_tab_view_120s_user_cnt",
+        "app_tab_view_180s_user_cnt",
+        "app_tab_view_300s_user_cnt",
+        "app_tab_view_600s_user_cnt",
+        "app_tab_view_events_cnt",
+        "app_tab_view_60s_events_cnt",
+        "app_tab_view_120s_events_cnt",
+        "app_tab_view_180s_events_cnt",
+        "app_tab_view_300s_events_cnt",
+        "app_tab_view_600s_events_cnt",
+        "mobweb_app_tab_view_60s_user_cnt",
+        "mobweb_app_tab_view_120s_user_cnt",
+        "mobweb_app_tab_view_180s_user_cnt",
+        "mobweb_app_tab_view_300s_user_cnt",
+        "mobweb_app_tab_view_600s_user_cnt",
+        "mobweb_app_tab_view_events_cnt",
+        "mobweb_app_tab_view_60s_events_cnt",
+        "mobweb_app_tab_view_120s_events_cnt",
+        "mobweb_app_tab_view_180s_events_cnt",
+        "mobweb_app_tab_view_300s_events_cnt",
+        "mobweb_app_tab_view_600s_events_cnt",
     ]
 
     float_columns = [
@@ -253,6 +286,24 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "arppu_var",
         "subscriptions_per_user_var",
         "charges_per_user_var",
+        "web_tab_view_events_per_user_var",
+        "web_tab_view_60s_events_per_user_var",
+        "web_tab_view_120s_events_per_user_var",
+        "web_tab_view_180s_events_per_user_var",
+        "web_tab_view_300s_events_per_user_var",
+        "web_tab_view_600s_events_per_user_var",
+        "app_tab_view_events_per_user_var",
+        "app_tab_view_60s_events_per_user_var",
+        "app_tab_view_120s_events_per_user_var",
+        "app_tab_view_180s_events_per_user_var",
+        "app_tab_view_300s_events_per_user_var",
+        "app_tab_view_600s_events_per_user_var",
+        "mobweb_app_tab_view_events_per_user_var",
+        "mobweb_app_tab_view_60s_events_per_user_var",
+        "mobweb_app_tab_view_120s_events_per_user_var",
+        "mobweb_app_tab_view_180s_events_per_user_var",
+        "mobweb_app_tab_view_300s_events_per_user_var",
+        "mobweb_app_tab_view_600s_events_per_user_var",
         "value",
         "conversion",
     ]
@@ -1505,6 +1556,36 @@ def get_retention_metrics(
         config=config,
     )
     logger.info("retention query:\n%s", query)
+    return execute_sql(query)
+
+
+def get_tab_view_metrics(
+    exp_info: dict,
+    exp_users_table: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str = "",
+    *,
+    calculate_app_tab_view: bool = True,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    is_web_client = client == "UG_WEB"
+    query = get_query(
+        "tab_view_metrics",
+        params={
+            "exp_id": exp_info["id"],
+            "exp_users_table": exp_users_table,
+            "client_sql": _clickhouse_string_literal(client),
+            "segment_sql": _clickhouse_string_literal(segment_name),
+            "segment_hash_sql": _clickhouse_string_literal(segment_hash),
+            "app_tab_view_unified_id_sql": "`app_unified_id`" if is_web_client else "`unified_id`",
+            "calculate_web_tab_view_sql": "1" if is_web_client else "0",
+            "calculate_app_tab_view_sql": "1" if calculate_app_tab_view else "0",
+            "is_web_client_sql": "1" if is_web_client else "0",
+        },
+        config=config,
+    )
+    logger.info("tab view query:\n%s", query)
     return execute_sql(query)
 
 

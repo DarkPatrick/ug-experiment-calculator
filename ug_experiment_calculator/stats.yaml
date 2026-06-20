@@ -259,3 +259,300 @@ mobweb_app_retention_14d_cnt:
   - platforms: ["mobile"]
   - description: "number of mobweb members retained in app within 24-360 hours since experiment start"
   - table_position: 29
+
+web_tab_view_60s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "60s Web Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members with Tab View 60s event during experiment window"
+  - table_position: 30
+
+web_tab_view_120s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "120s Web Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members with Tab View 120s event during experiment window"
+  - table_position: 31
+
+web_tab_view_180s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "180s Web Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members with Tab View 180s event during experiment window"
+  - table_position: 32
+
+web_tab_view_300s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "300s Web Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members with Tab View 300s event during experiment window"
+  - table_position: 33
+
+web_tab_view_600s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "600s Web Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of web members with Tab View 600s event during experiment window"
+  - table_position: 34
+
+app_tab_view_60s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "60s App Tab View Users"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members with Tab View 60s event during experiment window"
+  - table_position: 35
+
+app_tab_view_120s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "120s App Tab View Users"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members with Tab View 120s event during experiment window"
+  - table_position: 36
+
+app_tab_view_180s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "180s App Tab View Users"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members with Tab View 180s event during experiment window"
+  - table_position: 37
+
+app_tab_view_300s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "300s App Tab View Users"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members with Tab View 300s event during experiment window"
+  - table_position: 38
+
+app_tab_view_600s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "600s App Tab View Users"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "number of app members with Tab View 600s event during experiment window"
+  - table_position: 39
+
+mobweb_app_tab_view_60s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "60s Mobweb App Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb app members with Tab View 60s event during experiment window"
+  - table_position: 40
+
+mobweb_app_tab_view_120s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "120s Mobweb App Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb app members with Tab View 120s event during experiment window"
+  - table_position: 41
+
+mobweb_app_tab_view_180s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "180s Mobweb App Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb app members with Tab View 180s event during experiment window"
+  - table_position: 42
+
+mobweb_app_tab_view_300s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "300s Mobweb App Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb app members with Tab View 300s event during experiment window"
+  - table_position: 43
+
+mobweb_app_tab_view_600s_user_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "600s Mobweb App Tab View Users"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "number of mobweb app members with Tab View 600s event during experiment window"
+  - table_position: 44
+
+web_tab_view_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View events for web members during experiment window"
+  - table_position: 45
+
+web_tab_view_60s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View 60s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 60s events for web members during experiment window"
+  - table_position: 46
+
+web_tab_view_120s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View 120s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 120s events for web members during experiment window"
+  - table_position: 47
+
+web_tab_view_180s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View 180s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 180s events for web members during experiment window"
+  - table_position: 48
+
+web_tab_view_300s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View 300s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 300s events for web members during experiment window"
+  - table_position: 49
+
+web_tab_view_600s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Web Tab View 600s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 600s events for web members during experiment window"
+  - table_position: 50
+
+app_tab_view_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View events for app members during experiment window"
+  - table_position: 51
+
+app_tab_view_60s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View 60s Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 60s events for app members during experiment window"
+  - table_position: 52
+
+app_tab_view_120s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View 120s Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 120s events for app members during experiment window"
+  - table_position: 53
+
+app_tab_view_180s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View 180s Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 180s events for app members during experiment window"
+  - table_position: 54
+
+app_tab_view_300s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View 300s Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 300s events for app members during experiment window"
+  - table_position: 55
+
+app_tab_view_600s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "App Tab View 600s Events"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "unique datetime Tab View 600s events for app members during experiment window"
+  - table_position: 56
+
+mobweb_app_tab_view_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View events for mobweb app members during experiment window"
+  - table_position: 57
+
+mobweb_app_tab_view_60s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View 60s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View 60s events for mobweb app members during experiment window"
+  - table_position: 58
+
+mobweb_app_tab_view_120s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View 120s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View 120s events for mobweb app members during experiment window"
+  - table_position: 59
+
+mobweb_app_tab_view_180s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View 180s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View 180s events for mobweb app members during experiment window"
+  - table_position: 60
+
+mobweb_app_tab_view_300s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View 300s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View 300s events for mobweb app members during experiment window"
+  - table_position: 61
+
+mobweb_app_tab_view_600s_events_cnt:
+  - domain: "product"
+  - type: int
+  - display_name: "Mobweb App Tab View 600s Events"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "unique datetime Tab View 600s events for mobweb app members during experiment window"
+  - table_position: 62

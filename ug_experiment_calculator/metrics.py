@@ -61,6 +61,18 @@ def calc_cumulative_aggregates(df: pd.DataFrame) -> pd.DataFrame:
             "revenue_col": "charge_cnt",
         },
     }
+    for source_prefix in ("web", "app", "mobweb_app"):
+        for event_suffix in ("", "_60s", "_120s", "_180s", "_300s", "_600s"):
+            event_col = f"{source_prefix}_tab_view{event_suffix}_events_cnt"
+            var_config[f"{source_prefix}_tab_view{event_suffix}_events_per_user_var"] = {
+                "count_col": "app_referral_tour_cnt" if source_prefix == "mobweb_app" else "members",
+                "revenue_col": event_col,
+            }
+    var_config = {
+        var_col: cfg
+        for var_col, cfg in var_config.items()
+        if var_col in df.columns and cfg["count_col"] in df.columns and cfg["revenue_col"] in df.columns
+    }
 
     var_cols = set(var_config.keys())
     regular_cols = [col for col in df.columns if col not in ["dt", "variation"] and col not in var_cols]

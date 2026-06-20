@@ -62,6 +62,7 @@ _EXPORTS = {
     "get_stat_confluence_chart_code": ("confluence_charts", "get_stat_confluence_chart_code"),
     "get_stat_confluence_chart_data": ("confluence_charts", "get_stat_confluence_chart_data"),
     "get_segment_hash": ("repository", "get_segment_hash"),
+    "get_tab_view_metrics": ("repository", "get_tab_view_metrics"),
     "get_tour_subscription_funnels": ("repository", "get_tour_subscription_funnels"),
     "get_user_filters_hash": ("repository", "get_user_filters_hash"),
     "get_ugg_exps_list": ("repository", "get_ugg_exps_list"),

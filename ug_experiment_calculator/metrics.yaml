@@ -298,7 +298,7 @@ app retention 14d, %:
 mobweb app retention 1d, %:
   - domain: "product"
   - numerator: mobweb_app_retention_1d_cnt
-  - denominator: members
+  - denominator: app_referral_tour_cnt
   - percentage: true
   - distribution: "bernoulli"
   - sources: ["UG_WEB"]
@@ -311,7 +311,7 @@ mobweb app retention 1d, %:
 mobweb app retention 7d, %:
   - domain: "product"
   - numerator: mobweb_app_retention_7d_cnt
-  - denominator: members
+  - denominator: app_referral_tour_cnt
   - percentage: true
   - distribution: "bernoulli"
   - sources: ["UG_WEB"]
@@ -324,7 +324,7 @@ mobweb app retention 7d, %:
 mobweb app retention 14d, %:
   - domain: "product"
   - numerator: mobweb_app_retention_14d_cnt
-  - denominator: members
+  - denominator: app_referral_tour_cnt
   - percentage: true
   - distribution: "bernoulli"
   - sources: ["UG_WEB"]
@@ -333,3 +333,414 @@ mobweb app retention 14d, %:
   - table_position: 26
   - positive: 1
   - suffix: "%"
+
+web tab view 60s users, %:
+  - domain: "product"
+  - numerator: web_tab_view_60s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web members with Tab View 60s within experiment window"
+  - table_position: 27
+  - positive: 1
+  - suffix: "%"
+
+web tab view 120s users, %:
+  - domain: "product"
+  - numerator: web_tab_view_120s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web members with Tab View 120s within experiment window"
+  - table_position: 28
+  - positive: 1
+  - suffix: "%"
+
+web tab view 180s users, %:
+  - domain: "product"
+  - numerator: web_tab_view_180s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web members with Tab View 180s within experiment window"
+  - table_position: 29
+  - positive: 1
+  - suffix: "%"
+
+web tab view 300s users, %:
+  - domain: "product"
+  - numerator: web_tab_view_300s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web members with Tab View 300s within experiment window"
+  - table_position: 30
+  - positive: 1
+  - suffix: "%"
+
+web tab view 600s users, %:
+  - domain: "product"
+  - numerator: web_tab_view_600s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web members with Tab View 600s within experiment window"
+  - table_position: 31
+  - positive: 1
+  - suffix: "%"
+
+app tab view 60s users, %:
+  - domain: "product"
+  - numerator: app_tab_view_60s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of app members with Tab View 60s within experiment window"
+  - table_position: 32
+  - positive: 1
+  - suffix: "%"
+
+app tab view 120s users, %:
+  - domain: "product"
+  - numerator: app_tab_view_120s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of app members with Tab View 120s within experiment window"
+  - table_position: 33
+  - positive: 1
+  - suffix: "%"
+
+app tab view 180s users, %:
+  - domain: "product"
+  - numerator: app_tab_view_180s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of app members with Tab View 180s within experiment window"
+  - table_position: 34
+  - positive: 1
+  - suffix: "%"
+
+app tab view 300s users, %:
+  - domain: "product"
+  - numerator: app_tab_view_300s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of app members with Tab View 300s within experiment window"
+  - table_position: 35
+  - positive: 1
+  - suffix: "%"
+
+app tab view 600s users, %:
+  - domain: "product"
+  - numerator: app_tab_view_600s_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of app members with Tab View 600s within experiment window"
+  - table_position: 36
+  - positive: 1
+  - suffix: "%"
+
+mobweb app tab view 60s users, %:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_60s_user_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "share of mobweb app members with Tab View 60s within experiment window"
+  - table_position: 37
+  - positive: 1
+  - suffix: "%"
+
+mobweb app tab view 120s users, %:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_120s_user_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "share of mobweb app members with Tab View 120s within experiment window"
+  - table_position: 38
+  - positive: 1
+  - suffix: "%"
+
+mobweb app tab view 180s users, %:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_180s_user_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "share of mobweb app members with Tab View 180s within experiment window"
+  - table_position: 39
+  - positive: 1
+  - suffix: "%"
+
+mobweb app tab view 300s users, %:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_300s_user_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "share of mobweb app members with Tab View 300s within experiment window"
+  - table_position: 40
+  - positive: 1
+  - suffix: "%"
+
+mobweb app tab view 600s users, %:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_600s_user_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "share of mobweb app members with Tab View 600s within experiment window"
+  - table_position: 41
+  - positive: 1
+  - suffix: "%"
+
+web tab view events per user:
+  - domain: "product"
+  - numerator: web_tab_view_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View events per member within experiment window"
+  - table_position: 42
+  - positive: 1
+
+web tab view 60s events per user:
+  - domain: "product"
+  - numerator: web_tab_view_60s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_60s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View 60s events per member within experiment window"
+  - table_position: 43
+  - positive: 1
+
+web tab view 120s events per user:
+  - domain: "product"
+  - numerator: web_tab_view_120s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_120s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View 120s events per member within experiment window"
+  - table_position: 44
+  - positive: 1
+
+web tab view 180s events per user:
+  - domain: "product"
+  - numerator: web_tab_view_180s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_180s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View 180s events per member within experiment window"
+  - table_position: 45
+  - positive: 1
+
+web tab view 300s events per user:
+  - domain: "product"
+  - numerator: web_tab_view_300s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_300s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View 300s events per member within experiment window"
+  - table_position: 46
+  - positive: 1
+
+web tab view 600s events per user:
+  - domain: "product"
+  - numerator: web_tab_view_600s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: web_tab_view_600s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web Tab View 600s events per member within experiment window"
+  - table_position: 47
+  - positive: 1
+
+app tab view events per user:
+  - domain: "product"
+  - numerator: app_tab_view_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View events per member within experiment window"
+  - table_position: 48
+  - positive: 1
+
+app tab view 60s events per user:
+  - domain: "product"
+  - numerator: app_tab_view_60s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_60s_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View 60s events per member within experiment window"
+  - table_position: 49
+  - positive: 1
+
+app tab view 120s events per user:
+  - domain: "product"
+  - numerator: app_tab_view_120s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_120s_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View 120s events per member within experiment window"
+  - table_position: 50
+  - positive: 1
+
+app tab view 180s events per user:
+  - domain: "product"
+  - numerator: app_tab_view_180s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_180s_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View 180s events per member within experiment window"
+  - table_position: 51
+  - positive: 1
+
+app tab view 300s events per user:
+  - domain: "product"
+  - numerator: app_tab_view_300s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_300s_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View 300s events per member within experiment window"
+  - table_position: 52
+  - positive: 1
+
+app tab view 600s events per user:
+  - domain: "product"
+  - numerator: app_tab_view_600s_events_cnt
+  - denominator: members
+  - percentage: false
+  - variance: app_tab_view_600s_events_per_user_var
+  - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average number of app Tab View 600s events per member within experiment window"
+  - table_position: 53
+  - positive: 1
+
+mobweb app tab view events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View events per member within experiment window"
+  - table_position: 54
+  - positive: 1
+
+mobweb app tab view 60s events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_60s_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_60s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View 60s events per member within experiment window"
+  - table_position: 55
+  - positive: 1
+
+mobweb app tab view 120s events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_120s_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_120s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View 120s events per member within experiment window"
+  - table_position: 56
+  - positive: 1
+
+mobweb app tab view 180s events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_180s_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_180s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View 180s events per member within experiment window"
+  - table_position: 57
+  - positive: 1
+
+mobweb app tab view 300s events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_300s_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_300s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View 300s events per member within experiment window"
+  - table_position: 58
+  - positive: 1
+
+mobweb app tab view 600s events per user:
+  - domain: "product"
+  - numerator: mobweb_app_tab_view_600s_events_cnt
+  - denominator: app_referral_tour_cnt
+  - percentage: false
+  - variance: mobweb_app_tab_view_600s_events_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["mobile"]
+  - description: "average number of mobweb app Tab View 600s events per member within experiment window"
+  - table_position: 59
+  - positive: 1

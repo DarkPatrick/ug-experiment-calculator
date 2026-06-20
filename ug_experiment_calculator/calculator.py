@@ -33,6 +33,7 @@ from .repository import (
     get_monetization_metrics,
     get_retention_metrics,
     get_segment_hash,
+    get_tab_view_metrics,
     get_user_filters_hash,
     is_mobweb_segment,
     update_exp_results_table,
@@ -63,19 +64,82 @@ RETENTION_COUNT_COLUMNS = [
 ]
 
 
-def _merge_retention_metrics(df: pd.DataFrame, retention_df: pd.DataFrame) -> pd.DataFrame:
-    if retention_df.empty:
+TAB_VIEW_METRIC_COLUMNS = [
+    "web_tab_view_60s_user_cnt",
+    "web_tab_view_120s_user_cnt",
+    "web_tab_view_180s_user_cnt",
+    "web_tab_view_300s_user_cnt",
+    "web_tab_view_600s_user_cnt",
+    "web_tab_view_events_cnt",
+    "web_tab_view_60s_events_cnt",
+    "web_tab_view_120s_events_cnt",
+    "web_tab_view_180s_events_cnt",
+    "web_tab_view_300s_events_cnt",
+    "web_tab_view_600s_events_cnt",
+    "web_tab_view_events_per_user_var",
+    "web_tab_view_60s_events_per_user_var",
+    "web_tab_view_120s_events_per_user_var",
+    "web_tab_view_180s_events_per_user_var",
+    "web_tab_view_300s_events_per_user_var",
+    "web_tab_view_600s_events_per_user_var",
+    "app_tab_view_60s_user_cnt",
+    "app_tab_view_120s_user_cnt",
+    "app_tab_view_180s_user_cnt",
+    "app_tab_view_300s_user_cnt",
+    "app_tab_view_600s_user_cnt",
+    "app_tab_view_events_cnt",
+    "app_tab_view_60s_events_cnt",
+    "app_tab_view_120s_events_cnt",
+    "app_tab_view_180s_events_cnt",
+    "app_tab_view_300s_events_cnt",
+    "app_tab_view_600s_events_cnt",
+    "app_tab_view_events_per_user_var",
+    "app_tab_view_60s_events_per_user_var",
+    "app_tab_view_120s_events_per_user_var",
+    "app_tab_view_180s_events_per_user_var",
+    "app_tab_view_300s_events_per_user_var",
+    "app_tab_view_600s_events_per_user_var",
+    "mobweb_app_tab_view_60s_user_cnt",
+    "mobweb_app_tab_view_120s_user_cnt",
+    "mobweb_app_tab_view_180s_user_cnt",
+    "mobweb_app_tab_view_300s_user_cnt",
+    "mobweb_app_tab_view_600s_user_cnt",
+    "mobweb_app_tab_view_events_cnt",
+    "mobweb_app_tab_view_60s_events_cnt",
+    "mobweb_app_tab_view_120s_events_cnt",
+    "mobweb_app_tab_view_180s_events_cnt",
+    "mobweb_app_tab_view_300s_events_cnt",
+    "mobweb_app_tab_view_600s_events_cnt",
+    "mobweb_app_tab_view_events_per_user_var",
+    "mobweb_app_tab_view_60s_events_per_user_var",
+    "mobweb_app_tab_view_120s_events_per_user_var",
+    "mobweb_app_tab_view_180s_events_per_user_var",
+    "mobweb_app_tab_view_300s_events_per_user_var",
+    "mobweb_app_tab_view_600s_events_per_user_var",
+]
+
+
+def _merge_metric_frame(df: pd.DataFrame, metric_df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    if metric_df.empty:
         result = df.copy()
-        for column in RETENTION_COUNT_COLUMNS:
+        for column in columns:
             result[column] = 0
         return result
 
-    result = df.merge(retention_df, on=["dt", "variation"], how="left")
-    for column in RETENTION_COUNT_COLUMNS:
+    result = df.merge(metric_df, on=["dt", "variation"], how="left")
+    for column in columns:
         if column not in result.columns:
             result[column] = 0
         result[column] = result[column].fillna(0)
     return result
+
+
+def _merge_retention_metrics(df: pd.DataFrame, retention_df: pd.DataFrame) -> pd.DataFrame:
+    return _merge_metric_frame(df, retention_df, RETENTION_COUNT_COLUMNS)
+
+
+def _merge_tab_view_metrics(df: pd.DataFrame, tab_view_df: pd.DataFrame) -> pd.DataFrame:
+    return _merge_metric_frame(df, tab_view_df, TAB_VIEW_METRIC_COLUMNS)
 
 
 def _replace_exp_output_table(
@@ -131,6 +195,7 @@ def calculate_exp_info(
     stats_df_tot = {}
     df_cum_agg_tot = {}
     retention_cache = {}
+    tab_view_cache = {}
     exp_users_table = ""
     subscription_table = ""
 
@@ -182,6 +247,29 @@ def calculate_exp_info(
                     segment_name,
                 )
             df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
+
+            if retention_cache_key not in tab_view_cache:
+                logger.info("Loading tab view metrics")
+                tab_view_cache[retention_cache_key] = get_tab_view_metrics(
+                    exp_info,
+                    exp_users_table,
+                    client,
+                    segment_name,
+                    segment_hash,
+                    calculate_app_tab_view=(
+                        client != "UG_WEB"
+                        or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
+                    ),
+                    config=cfg,
+                )
+            else:
+                logger.info(
+                    "Reusing tab view metrics for exp_id=%s, client=%s, segment=%s",
+                    exp_id,
+                    client,
+                    segment_name,
+                )
+            df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
             df_tot[(client, segment_name)] = df
 
             logger.info("Loading subscription funnels")
