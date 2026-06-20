@@ -12,6 +12,7 @@ import yaml
 
 
 DEFAULT_METRIC_DOMAIN = "monetization"
+DEFAULT_METRIC_SUBDOMAIN = ""
 
 
 def fill_missing_variations_by_date(df: pd.DataFrame) -> pd.DataFrame:
@@ -330,6 +331,16 @@ def config_enabled_for_domain(config: dict, domain: str | None = None) -> bool:
     return metric_config_domain(config) == str(domain).strip().lower()
 
 
+def metric_config_subdomain(config: dict) -> str:
+    return str(config.get("subdomain") or DEFAULT_METRIC_SUBDOMAIN).strip().lower()
+
+
+def config_enabled_for_subdomain(config: dict, subdomain: str | None = None) -> bool:
+    if subdomain is None:
+        return True
+    return metric_config_subdomain(config) == str(subdomain).strip().lower()
+
+
 def metric_columns_for_client(
     metrics_yaml_path: str | Path,
     client: str,
@@ -337,6 +348,7 @@ def metric_columns_for_client(
     segment: dict | None = None,
     clients_options: object = "",
     domain: str | None = None,
+    subdomain: str | None = None,
 ) -> set[str]:
     metrics_config = load_metrics_config(metrics_yaml_path)
     columns = set()
@@ -344,6 +356,8 @@ def metric_columns_for_client(
     for metric_items in metrics_config.values():
         metric_config = normalize_metric_config(metric_items)
         if not config_enabled_for_domain(metric_config, domain):
+            continue
+        if not config_enabled_for_subdomain(metric_config, subdomain):
             continue
         if not config_enabled_for_context(metric_config, client, segment=segment, clients_options=clients_options):
             continue
@@ -363,6 +377,7 @@ def stats_columns_for_client(
     segment: dict | None = None,
     clients_options: object = "",
     domain: str | None = None,
+    subdomain: str | None = None,
 ) -> set[str]:
     stats_config = load_metrics_config(stats_yaml_path)
     columns = set()
@@ -374,6 +389,8 @@ def stats_columns_for_client(
             continue
 
         if not config_enabled_for_domain(stat_config, domain):
+            continue
+        if not config_enabled_for_subdomain(stat_config, subdomain):
             continue
         if not config_enabled_for_context(stat_config, client, segment=segment, clients_options=clients_options):
             continue
@@ -561,6 +578,7 @@ def calc_metrics_stats_by_variation_pairs(
     segment: dict | None = None,
     clients_options: object = "",
     domain: str | None = None,
+    subdomain: str | None = None,
 ) -> pd.DataFrame:
     df = cumulative_df.copy()
     df["dt"] = pd.to_datetime(df["dt"])
@@ -578,6 +596,8 @@ def calc_metrics_stats_by_variation_pairs(
         distribution = metric_config.get("distribution")
         is_percentage = metric_config.get("percentage", False)
         if not config_enabled_for_domain(metric_config, domain):
+            continue
+        if not config_enabled_for_subdomain(metric_config, subdomain):
             continue
         if not config_enabled_for_context(metric_config, client, segment=segment, clients_options=clients_options):
             continue

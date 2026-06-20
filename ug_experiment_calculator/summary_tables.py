@@ -13,7 +13,7 @@ from .colors import (
     PVALUE_POSITIVE_COLOR,
 )
 from .config import ExperimentCalculatorConfig
-from .metrics import config_enabled_for_domain, load_metrics_config, normalize_metric_config
+from .metrics import config_enabled_for_domain, config_enabled_for_subdomain, load_metrics_config, normalize_metric_config
 from .value_formatting import (
     apply_number_affixes,
     format_diff_percent,
@@ -70,11 +70,12 @@ def get_latest_experiment_summary_tables(
     metrics_yaml_path: str | Path | None = None,
     stats_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cfg = config or ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
-    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain)
+    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain, subdomain=subdomain)
+    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain, subdomain=subdomain)
     results_rows = _get_latest_results_rows(
         exp_id,
         clients=clients,
@@ -95,6 +96,7 @@ def get_latest_experiment_summary_tables(
         metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
         stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
         domain=domain,
+        subdomain=subdomain,
     )
 
 
@@ -105,10 +107,11 @@ def build_latest_experiment_summary_tables(
     metrics_yaml_path: str | Path | None = None,
     stats_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     cfg = ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain)
-    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain)
+    metric_configs = _load_summary_item_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain, subdomain=subdomain)
+    stats_configs = _load_summary_item_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain, subdomain=subdomain)
     results_df = _build_results_summary_table(results_rows, metric_configs)
     stats_df = _build_stats_summary_table(stats_rows, stats_configs)
     return results_df, stats_df
@@ -332,12 +335,19 @@ def _latest_date_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["dt"] == latest_dt].copy().reset_index(drop=True)
 
 
-def _load_summary_item_configs(yaml_path: str | Path, *, domain: str | None = None) -> dict[str, _SummaryItemConfig]:
+def _load_summary_item_configs(
+    yaml_path: str | Path,
+    *,
+    domain: str | None = None,
+    subdomain: str | None = None,
+) -> dict[str, _SummaryItemConfig]:
     raw_config = load_metrics_config(yaml_path)
     result = {}
     for source_index, (item_name, item_config_items) in enumerate(raw_config.items()):
         item_config = normalize_metric_config(item_config_items)
         if not config_enabled_for_domain(item_config, domain):
+            continue
+        if not config_enabled_for_subdomain(item_config, subdomain):
             continue
         table_position = int(item_config.get("table_position") or 0)
         if table_position <= 0:

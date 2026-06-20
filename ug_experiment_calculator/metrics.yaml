@@ -219,6 +219,7 @@ pending trials share, %:
 
 web retention 1d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: web_retention_1d_cnt
   - denominator: members
   - percentage: true
@@ -232,6 +233,7 @@ web retention 1d, %:
 
 web retention 7d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: web_retention_7d_cnt
   - denominator: members
   - percentage: true
@@ -245,6 +247,7 @@ web retention 7d, %:
 
 web retention 14d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: web_retention_14d_cnt
   - denominator: members
   - percentage: true
@@ -258,6 +261,7 @@ web retention 14d, %:
 
 app retention 1d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: app_retention_1d_cnt
   - denominator: members
   - percentage: true
@@ -271,6 +275,7 @@ app retention 1d, %:
 
 app retention 7d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: app_retention_7d_cnt
   - denominator: members
   - percentage: true
@@ -284,6 +289,7 @@ app retention 7d, %:
 
 app retention 14d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: app_retention_14d_cnt
   - denominator: members
   - percentage: true
@@ -297,6 +303,7 @@ app retention 14d, %:
 
 mobweb app retention 1d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: mobweb_app_retention_1d_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -310,6 +317,7 @@ mobweb app retention 1d, %:
 
 mobweb app retention 7d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: mobweb_app_retention_7d_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -323,6 +331,7 @@ mobweb app retention 7d, %:
 
 mobweb app retention 14d, %:
   - domain: "product"
+  - subdomain: "retention"
   - numerator: mobweb_app_retention_14d_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -336,6 +345,7 @@ mobweb app retention 14d, %:
 
 web tab view 60s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_60s_user_cnt
   - denominator: members
   - percentage: true
@@ -349,6 +359,7 @@ web tab view 60s users, %:
 
 web tab view 120s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_120s_user_cnt
   - denominator: members
   - percentage: true
@@ -362,6 +373,7 @@ web tab view 120s users, %:
 
 web tab view 180s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_180s_user_cnt
   - denominator: members
   - percentage: true
@@ -375,6 +387,7 @@ web tab view 180s users, %:
 
 web tab view 300s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_300s_user_cnt
   - denominator: members
   - percentage: true
@@ -388,6 +401,7 @@ web tab view 300s users, %:
 
 web tab view 600s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_600s_user_cnt
   - denominator: members
   - percentage: true
@@ -401,6 +415,7 @@ web tab view 600s users, %:
 
 app tab view 60s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_60s_user_cnt
   - denominator: members
   - percentage: true
@@ -414,6 +429,7 @@ app tab view 60s users, %:
 
 app tab view 120s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_120s_user_cnt
   - denominator: members
   - percentage: true
@@ -427,6 +443,7 @@ app tab view 120s users, %:
 
 app tab view 180s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_180s_user_cnt
   - denominator: members
   - percentage: true
@@ -440,6 +457,7 @@ app tab view 180s users, %:
 
 app tab view 300s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_300s_user_cnt
   - denominator: members
   - percentage: true
@@ -453,6 +471,7 @@ app tab view 300s users, %:
 
 app tab view 600s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_600s_user_cnt
   - denominator: members
   - percentage: true
@@ -466,6 +485,7 @@ app tab view 600s users, %:
 
 mobweb app tab view 60s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_60s_user_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -479,6 +499,7 @@ mobweb app tab view 60s users, %:
 
 mobweb app tab view 120s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_120s_user_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -492,6 +513,7 @@ mobweb app tab view 120s users, %:
 
 mobweb app tab view 180s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_180s_user_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -505,6 +527,7 @@ mobweb app tab view 180s users, %:
 
 mobweb app tab view 300s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_300s_user_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -518,6 +541,7 @@ mobweb app tab view 300s users, %:
 
 mobweb app tab view 600s users, %:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_600s_user_cnt
   - denominator: app_referral_tour_cnt
   - percentage: true
@@ -531,6 +555,7 @@ mobweb app tab view 600s users, %:
 
 web tab view events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_events_cnt
   - denominator: members
   - percentage: false
@@ -543,6 +568,7 @@ web tab view events per user:
 
 web tab view 60s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_60s_events_cnt
   - denominator: members
   - percentage: false
@@ -555,6 +581,7 @@ web tab view 60s events per user:
 
 web tab view 120s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_120s_events_cnt
   - denominator: members
   - percentage: false
@@ -567,6 +594,7 @@ web tab view 120s events per user:
 
 web tab view 180s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_180s_events_cnt
   - denominator: members
   - percentage: false
@@ -579,6 +607,7 @@ web tab view 180s events per user:
 
 web tab view 300s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_300s_events_cnt
   - denominator: members
   - percentage: false
@@ -591,6 +620,7 @@ web tab view 300s events per user:
 
 web tab view 600s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: web_tab_view_600s_events_cnt
   - denominator: members
   - percentage: false
@@ -603,6 +633,7 @@ web tab view 600s events per user:
 
 app tab view events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_events_cnt
   - denominator: members
   - percentage: false
@@ -615,6 +646,7 @@ app tab view events per user:
 
 app tab view 60s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_60s_events_cnt
   - denominator: members
   - percentage: false
@@ -627,6 +659,7 @@ app tab view 60s events per user:
 
 app tab view 120s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_120s_events_cnt
   - denominator: members
   - percentage: false
@@ -639,6 +672,7 @@ app tab view 120s events per user:
 
 app tab view 180s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_180s_events_cnt
   - denominator: members
   - percentage: false
@@ -651,6 +685,7 @@ app tab view 180s events per user:
 
 app tab view 300s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_300s_events_cnt
   - denominator: members
   - percentage: false
@@ -663,6 +698,7 @@ app tab view 300s events per user:
 
 app tab view 600s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: app_tab_view_600s_events_cnt
   - denominator: members
   - percentage: false
@@ -675,6 +711,7 @@ app tab view 600s events per user:
 
 mobweb app tab view events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false
@@ -687,6 +724,7 @@ mobweb app tab view events per user:
 
 mobweb app tab view 60s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_60s_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false
@@ -699,6 +737,7 @@ mobweb app tab view 60s events per user:
 
 mobweb app tab view 120s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_120s_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false
@@ -711,6 +750,7 @@ mobweb app tab view 120s events per user:
 
 mobweb app tab view 180s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_180s_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false
@@ -723,6 +763,7 @@ mobweb app tab view 180s events per user:
 
 mobweb app tab view 300s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_300s_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false
@@ -735,6 +776,7 @@ mobweb app tab view 300s events per user:
 
 mobweb app tab view 600s events per user:
   - domain: "product"
+  - subdomain: "tab"
   - numerator: mobweb_app_tab_view_600s_events_cnt
   - denominator: app_referral_tour_cnt
   - percentage: false

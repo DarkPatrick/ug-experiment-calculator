@@ -26,6 +26,7 @@ _EXPORTS = {
     "calc_metrics_stats_by_variation_pairs": ("metrics", "calc_metrics_stats_by_variation_pairs"),
     "calc_stats": ("metrics", "calc_stats"),
     "calculate_exp_info": ("calculator", "calculate_exp_info"),
+    "config_enabled_for_subdomain": ("metrics", "config_enabled_for_subdomain"),
     "clear_exp_temp_tables": ("repository", "clear_exp_temp_tables"),
     "create_exp_funnel_results_table": ("repository", "create_exp_funnel_results_table"),
     "create_exp_funnel_stats_table": ("repository", "create_exp_funnel_stats_table"),

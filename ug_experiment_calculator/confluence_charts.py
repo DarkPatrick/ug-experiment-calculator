@@ -11,7 +11,7 @@ import pandas as pd
 
 from .colors import CHART_COLOR_RGB_VALUES, SIGNIFICANCE_LEVEL_COLOR
 from .config import ExperimentCalculatorConfig
-from .metrics import config_enabled_for_domain, load_metrics_config, normalize_metric_config
+from .metrics import config_enabled_for_domain, config_enabled_for_subdomain, load_metrics_config, normalize_metric_config
 from .value_formatting import format_plain_number
 
 
@@ -40,13 +40,14 @@ def get_metric_confluence_chart_data(
     *,
     metrics_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
-    if not _metric_enabled_for_domain(metric, metrics_yaml_path or cfg.metrics_yaml_path, domain=domain):
+    if not _metric_enabled_for_domain(metric, metrics_yaml_path or cfg.metrics_yaml_path, domain=domain, subdomain=subdomain):
         return pd.DataFrame(columns=["metric", "control_variation", "test_variation", "lift", "pvalue", *CONFLUENCE_CHART_BASE_COLUMNS])
 
     query = f"""
@@ -222,6 +223,7 @@ def get_metric_confluence_chart_code(
     image_format: str = "png",
     metrics_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_metric_confluence_chart_data(
@@ -231,6 +233,7 @@ def get_metric_confluence_chart_code(
         segment,
         metrics_yaml_path=metrics_yaml_path,
         domain=domain,
+        subdomain=subdomain,
         config=config,
     )
     return build_metric_confluence_chart_code(
@@ -263,6 +266,7 @@ def get_metric_confluence_lift_chart_code(
     image_format: str = "png",
     metrics_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_metric_confluence_chart_data(
@@ -272,6 +276,7 @@ def get_metric_confluence_lift_chart_code(
         segment,
         metrics_yaml_path=metrics_yaml_path,
         domain=domain,
+        subdomain=subdomain,
         config=config,
     )
     return build_metric_confluence_lift_chart_code(
@@ -295,13 +300,14 @@ def get_stat_confluence_chart_data(
     *,
     stats_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
-    if not _metric_enabled_for_domain(metric, stats_yaml_path or cfg.stats_yaml_path, domain=domain):
+    if not _metric_enabled_for_domain(metric, stats_yaml_path or cfg.stats_yaml_path, domain=domain, subdomain=subdomain):
         return pd.DataFrame(columns=["metric", "value", *CONFLUENCE_STAT_CHART_BASE_COLUMNS])
 
     query = f"""
@@ -338,6 +344,7 @@ def get_stat_confluence_chart_code(
     image_format: str = "png",
     stats_yaml_path: str | Path | None = None,
     domain: str = "monetization",
+    subdomain: str | None = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     rows = get_stat_confluence_chart_data(
@@ -347,6 +354,7 @@ def get_stat_confluence_chart_code(
         segment,
         stats_yaml_path=stats_yaml_path,
         domain=domain,
+        subdomain=subdomain,
         config=config,
     )
     return build_stat_confluence_chart_code(
@@ -369,12 +377,19 @@ class _ChartData:
         self.values_by_date = values_by_date
 
 
-def _metric_enabled_for_domain(metric: str, yaml_path: str | Path, *, domain: str | None) -> bool:
+def _metric_enabled_for_domain(
+    metric: str,
+    yaml_path: str | Path,
+    *,
+    domain: str | None,
+    subdomain: str | None = None,
+) -> bool:
     metrics_config = load_metrics_config(yaml_path)
     metric_items = metrics_config.get(metric)
     if metric_items is None:
         return False
-    return config_enabled_for_domain(normalize_metric_config(metric_items), domain)
+    metric_config = normalize_metric_config(metric_items)
+    return config_enabled_for_domain(metric_config, domain) and config_enabled_for_subdomain(metric_config, subdomain)
 
 
 def _prepare_chart_data(
