@@ -1957,12 +1957,12 @@ def _cell_attributes(
 
 
 def _build_report_client_body(sections: Mapping[str, str]) -> str:
-    stats_body = "\n".join([
+    stats_body = _join_report_blocks([
         _report_labeled_table("Monetization Stats", sections.get("monetization_stats", "")),
         _report_labeled_table("Retention Stats", sections.get("retention_stats", "")),
         _report_labeled_table("Long Tab View Stats", sections.get("tab_stats", "")),
     ])
-    return "\n".join([
+    return _join_report_blocks([
         _report_labeled_table("Monetization Metrics", sections.get("monetization_metrics", "")),
         _report_labeled_table("Retention Metrics", sections.get("retention_metrics", "")),
         _report_labeled_table("Tab View Metrics", sections.get("tab_metrics", "")),
@@ -1975,6 +1975,10 @@ def _report_labeled_table(label: str, body: str) -> str:
         _paragraph(_strong_text(label)),
         body or _table([]),
     ])
+
+
+def _join_report_blocks(blocks: Sequence[str]) -> str:
+    return f"\n{_blank_paragraph()}\n".join(block for block in blocks if block)
 
 
 def _date_range_paragraph(date_start: Any, date_end: Any) -> str:
@@ -2002,6 +2006,10 @@ def _heading(level: int, text: str) -> str:
 
 def _paragraph(body: str) -> str:
     return f"<p>{body}</p>"
+
+
+def _blank_paragraph() -> str:
+    return "<p><br /></p>"
 
 
 def _strong_text(text: str) -> str:

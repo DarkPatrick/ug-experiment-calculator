@@ -14,7 +14,6 @@ from .metrics import (
     calc_metrics_stats_by_variation_pairs,
     funnel_enabled_for_client,
     load_funnels_config,
-    metric_columns_for_client,
     normalize_funnel_config,
     stats_columns_for_client,
 )
@@ -196,6 +195,7 @@ def calculate_exp_info(
     df_cum_agg_tot = {}
     retention_cache = {}
     tab_view_cache = {}
+    product_metrics_segments = {}
     exp_users_table = ""
     subscription_table = ""
 
@@ -226,7 +226,12 @@ def calculate_exp_info(
                 client,
                 get_user_filters_hash(segment, client=client, clients_options=exp_info.get("clients_options", "")),
             )
-            if retention_cache_key not in retention_cache:
+            product_metrics_source_segment = product_metrics_segments.get(retention_cache_key)
+            include_product_metrics = product_metrics_source_segment is None
+            if include_product_metrics:
+                product_metrics_segments[retention_cache_key] = segment_name
+
+            if include_product_metrics and retention_cache_key not in retention_cache:
                 logger.info("Loading retention metrics")
                 retention_cache[retention_cache_key] = get_retention_metrics(
                     exp_users_table,
@@ -239,16 +244,26 @@ def calculate_exp_info(
                     ),
                     config=cfg,
                 )
-            else:
+            elif include_product_metrics:
                 logger.info(
                     "Reusing retention metrics for exp_id=%s, client=%s, segment=%s",
                     exp_id,
                     client,
                     segment_name,
                 )
-            df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
+            else:
+                logger.info(
+                    "Skipping retention metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
+                    exp_id,
+                    client,
+                    segment_name,
+                    product_metrics_source_segment,
+                )
 
-            if retention_cache_key not in tab_view_cache:
+            if include_product_metrics:
+                df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
+
+            if include_product_metrics and retention_cache_key not in tab_view_cache:
                 logger.info("Loading tab view metrics")
                 tab_view_cache[retention_cache_key] = get_tab_view_metrics(
                     exp_info,
@@ -262,14 +277,24 @@ def calculate_exp_info(
                     ),
                     config=cfg,
                 )
-            else:
+            elif include_product_metrics:
                 logger.info(
                     "Reusing tab view metrics for exp_id=%s, client=%s, segment=%s",
                     exp_id,
                     client,
                     segment_name,
                 )
-            df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
+            else:
+                logger.info(
+                    "Skipping tab view metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
+                    exp_id,
+                    client,
+                    segment_name,
+                    product_metrics_source_segment,
+                )
+
+            if include_product_metrics:
+                df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
             df_tot[(client, segment_name)] = df
 
             logger.info("Loading subscription funnels")
@@ -352,6 +377,7 @@ def calculate_exp_info(
                 client=client,
                 segment=segment,
                 clients_options=exp_info.get("clients_options", ""),
+                domain=None if include_product_metrics else "monetization",
             )
 
             stats_metric_columns = stats_columns_for_client(
@@ -359,6 +385,7 @@ def calculate_exp_info(
                 client,
                 segment=segment,
                 clients_options=exp_info.get("clients_options", ""),
+                domain=None if include_product_metrics else "monetization",
             )
             stats_metric_columns = [col for col in df_cum_agg.columns if col in stats_metric_columns]
             df_cum_agg = df_cum_agg[["dt", "variation", *stats_metric_columns]]
