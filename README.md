@@ -525,6 +525,24 @@ table_code = build_design_confluence_table_code({
 
 Если имена колонок совпадают полностью, значения берутся по этим именам в указанном порядке. Если в именах есть опечатки или лишние символы, значения берутся в текущем порядке колонок датафрейма, а названия строк все равно выводятся из фиксированного списка выше. Блоки платформ идут горизонтально и разделяются фиолетовой объединенной колонкой.
 
+## Confluence-таблица Design vs Reality check
+
+```python
+from ug_experiment_calculator import get_design_reality_check_confluence_table_code
+
+table_code = get_design_reality_check_confluence_table_code(
+    7361,
+    {
+        "UGT_IOS": {"Duration (days)": 7, "Sample size": 10000},
+        "UGT_ANDROID": {"Duration (days)": 7, "Sample size": 10000},
+    },
+)
+```
+
+`Duration (days)` и `Sample size` описывают дизайн эксперимента. `Sample size` считается одинаковым на вариацию и подставляется во все variation-колонки. Реальные значения `Experiment` читаются из `ug_exp_stats` по метрике `members` в сегменте `Total`, длительность берется из метаданных эксперимента. В строке `Checks` duration чекбокс отмечается, если реальная длительность не меньше дизайна; sample-size чекбокс отмечается, если проходит SRM-check против равномерного сплита.
+
+В полном Confluence-блоке эксперимента тот же словарь можно передать в `get_experiment_confluence_report_code(..., design_reality_check=...)`, и таблица будет вставлена внутрь expand `Design vs Reality check`.
+
 ## Latest summary DataFrame
 
 Модуль `ug_experiment_calculator.summary_tables` возвращает две pandas-таблицы по последней доступной дате эксперимента.
@@ -617,6 +635,7 @@ from ug_experiment_calculator import (
 ```python
 from ug_experiment_calculator import (
     build_design_confluence_table_code,
+    build_design_reality_check_confluence_table_code,
     build_experiment_confluence_table_code,
     build_experiment_stats_confluence_table_code,
     build_latest_experiment_summary_tables,
@@ -627,6 +646,7 @@ from ug_experiment_calculator import (
     build_stat_confluence_chart_code,
     get_experiment_confluence_table_code,
     get_experiment_stats_confluence_table_code,
+    get_design_reality_check_confluence_table_code,
     get_latest_experiment_summary_tables,
     get_metric_confluence_chart_code,
     get_metric_confluence_lift_chart_code,
@@ -651,6 +671,8 @@ from ug_experiment_calculator import (
 - `get_rollout_impact_confluence_table_code(..., domain="monetization")` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки.
 - `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=..., domain="monetization")` - собрать Confluence storage table с оценкой раскатки из готовых строк.
 - `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
+- `get_design_reality_check_confluence_table_code(exp_id, design_rows)` - прочитать actual sample size из `members` Total и собрать Confluence storage table для `Design vs Reality check`.
+- `build_design_reality_check_confluence_table_code(experiment_rows, design_rows, ...)` - собрать `Design vs Reality check` из готовых строк actual sample size.
 - `get_latest_experiment_summary_tables(..., domain="monetization")` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
 - `build_latest_experiment_summary_tables(results_rows, stats_rows, domain="monetization", ...)` - собрать latest summary DataFrame из готовых строк.
 - `calculate_rollout_share(exp_id, clients=None, segment_name="Total", ...)` - посчитать по дням и client cumulative-долю пользователей эксперимента среди всех пользователей, засплитованных в эксперимент. Первые попадания split-users сохраняются инкрементально по дням в `rollout_split_users_<exp_id>`, а дневные агрегаты - в `ug_exp_rollout_split_users`.

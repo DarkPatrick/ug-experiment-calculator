@@ -4,11 +4,13 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 import datetime
 from html import escape
+import math
 from pathlib import Path
 import uuid
 from typing import Any, Optional
 
 import pandas as pd
+import scipy.stats as scipy_stats
 
 from .colors import (
     HEADER_COLOR,
@@ -72,6 +74,10 @@ DESIGN_SUMMARY_ROW = "Design summary"
 DESIGN_SAMPLE_ROW = "Sample"
 DESIGN_DAYS_ROW = "Days"
 DESIGN_SEPARATOR = "—"
+DESIGN_REALITY_DURATION_CHECK = "duration of exp ≥ design"
+DESIGN_REALITY_BALANCE_CHECK = "A/B balance is maintained"
+DESIGN_REALITY_NO_BUGS_CHECK = "No visible bugs were found throughout the experiment"
+DESIGN_REALITY_NO_EXTERNAL_EFFECTS_CHECK = "No external effects are visible"
 ROLLOUT_IMPACT_EXPERIMENT_START_COLUMN = "Experiment Start"
 ROLLOUT_IMPACT_TITLE = "Forecast (per day)"
 ROLLOUT_IMPACT_MEMBERS_STAT = "members"
@@ -313,6 +319,7 @@ def get_experiment_confluence_report_code(
     *,
     clients: Optional[Sequence[str]] = None,
     segments: Optional[Sequence[str]] = None,
+    design_reality_check: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]] | None = None,
     stats: Optional[Sequence[str]] = None,
     stats_yaml_path: str | Path | None = None,
     metrics_yaml_path: str | Path | None = None,
@@ -344,6 +351,17 @@ def get_experiment_confluence_report_code(
         thousands_separator=thousands_separator,
         update_split_users=update_split_users,
         ensure_experiment_users=ensure_experiment_users,
+    )
+    design_reality_check_code = (
+        get_design_reality_check_confluence_table_code(
+            exp_id,
+            design_reality_check,
+            clients=selected_clients,
+            config=cfg,
+            thousands_separator=thousands_separator,
+        )
+        if design_reality_check is not None
+        else ""
     )
 
     client_blocks = {
@@ -419,6 +437,7 @@ def get_experiment_confluence_report_code(
         date_end=report_date_end,
         exposure_event=str(exp_info.get("experiment_event_start") or ""),
         forecast_code=forecast_code,
+        design_reality_check_code=design_reality_check_code,
         client_blocks=client_blocks,
     )
 
@@ -431,6 +450,7 @@ def build_experiment_confluence_report_code(
     exposure_event: str,
     forecast_code: str,
     client_blocks: Mapping[str, Mapping[str, str]],
+    design_reality_check_code: str = "",
 ) -> str:
     body_blocks = [
         _date_range_paragraph(date_start, date_end),
@@ -438,7 +458,7 @@ def build_experiment_confluence_report_code(
         _heading(2, "Decision"),
         _heading(3, "Next steps"),
         forecast_code,
-        _ui_expand("Design vs Reality check", ""),
+        _ui_expand("Design vs Reality check", design_reality_check_code),
         _heading(2, "Significance analysis"),
     ]
 
@@ -486,6 +506,75 @@ def build_experiment_stats_confluence_table_code(
         thousands_separator=thousands_separator,
     )
     return _ui_expand("Stats", table_html or _table([]))
+
+
+def get_design_reality_check_confluence_table_code(
+    exp_id: int,
+    design_rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]],
+    *,
+    clients: Optional[Sequence[str]] = None,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    thousands_separator: bool = True,
+    srm_alpha: float = 0.001,
+) -> str:
+    from .repository import get_experiment
+
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    exp_info = get_experiment(exp_id, config=cfg)
+    selected_clients = _ordered_report_clients(clients or exp_info.get("clients_list") or cfg.default_clients)
+    variations = list(range(1, int(exp_info.get("variations") or 0) + 1))
+    experiment_rows = get_experiment_stats_confluence_table_data(
+        exp_id,
+        clients=selected_clients,
+        segments=[TOTAL_SEGMENT],
+        metrics=["members"],
+        config=cfg,
+    )
+    return build_design_reality_check_confluence_table_code(
+        experiment_rows,
+        design_rows,
+        clients=selected_clients,
+        variations=variations,
+        actual_duration_days=_experiment_duration_days(exp_info),
+        thousands_separator=thousands_separator,
+        srm_alpha=srm_alpha,
+    )
+
+
+def build_design_reality_check_confluence_table_code(
+    experiment_rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    design_rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]],
+    *,
+    clients: Optional[Sequence[str]] = None,
+    variations: Optional[Sequence[Any]] = None,
+    actual_duration_days: Any = None,
+    thousands_separator: bool = True,
+    srm_alpha: float = 0.001,
+) -> str:
+    experiment_df = _prepare_design_reality_experiment_rows(experiment_rows)
+    design_by_client = _prepare_design_reality_design_rows(design_rows)
+    variation_values = _design_reality_variations(experiment_df, variations)
+    client_values = _design_reality_clients(experiment_df, design_by_client, clients)
+    if not client_values:
+        return _table([])
+
+    rows = [
+        _design_reality_header_row(variation_values),
+        _design_reality_variations_header_row(variation_values),
+    ]
+    for client in client_values:
+        rows.extend(
+            _design_reality_client_rows(
+                client,
+                design_by_client.get(client, {}),
+                experiment_df[experiment_df["client"] == client].copy(),
+                variation_values,
+                actual_duration_days=actual_duration_days,
+                thousands_separator=thousands_separator,
+                srm_alpha=srm_alpha,
+            )
+        )
+    return _table(rows)
 
 
 def build_rollout_impact_confluence_table_code(
@@ -714,6 +803,256 @@ def build_design_confluence_table_code(
         rows.append(_row(cells))
 
     return _table(rows)
+
+
+def _prepare_design_reality_experiment_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:
+    df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
+    if df.empty:
+        return pd.DataFrame(columns=["client", "variation", "sample_size"])
+
+    if "metric" in df.columns:
+        df = df[df["metric"].astype(str) == "members"].copy()
+    if "segment" in df.columns:
+        df = df[df["segment"].astype(str) == TOTAL_SEGMENT].copy()
+
+    if "sample_size" not in df.columns:
+        if "value" not in df.columns:
+            raise ValueError("Missing Design vs Reality experiment column: sample_size")
+        df["sample_size"] = df["value"]
+
+    missing_columns = {"client", "variation", "sample_size"}.difference(df.columns)
+    if missing_columns:
+        missing_columns_str = ", ".join(sorted(missing_columns))
+        raise ValueError(f"Missing Design vs Reality experiment columns: {missing_columns_str}")
+
+    df["client"] = df["client"].astype(str)
+    df["variation"] = df["variation"].map(_normalize_variation_value)
+    df["sample_size"] = pd.to_numeric(df["sample_size"], errors="coerce")
+    if "dt" in df.columns:
+        df["dt"] = pd.to_datetime(df["dt"], errors="coerce")
+        df = (
+            df.sort_values("dt")
+            .groupby(["client", "variation"], as_index=False, dropna=False)
+            .tail(1)
+            .reset_index(drop=True)
+        )
+    return df[["client", "variation", "sample_size"]].reset_index(drop=True)
+
+
+def _prepare_design_reality_design_rows(
+    rows: Mapping[str, Mapping[str, Any]] | Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    if isinstance(rows, Mapping):
+        items = [
+            {"client": client, **dict(values)}
+            for client, values in rows.items()
+            if isinstance(values, Mapping)
+        ]
+    else:
+        items = [dict(item) for item in rows]
+
+    result = {}
+    for item in items:
+        client = _first_present_value(item, "client", "platform", "Platform")
+        if client is None:
+            continue
+        result[str(client)] = {
+            "duration_days": _first_present_value(
+                item,
+                "Duration (days)",
+                "duration_days",
+                "duration",
+                "days",
+            ),
+            "sample_size": _first_present_value(
+                item,
+                "Sample size",
+                "Sample size (per variation)",
+                "sample_size",
+                "sample_size_per_variation",
+                "sample",
+            ),
+        }
+    return result
+
+
+def _design_reality_variations(df: pd.DataFrame, variations: Optional[Sequence[Any]]) -> list[Any]:
+    if variations is not None:
+        values = [_normalize_variation_value(variation) for variation in variations]
+    else:
+        values = df["variation"].dropna().drop_duplicates().tolist()
+    return sorted(values, key=_variation_sort_key)
+
+
+def _design_reality_clients(
+    df: pd.DataFrame,
+    design_by_client: Mapping[str, Mapping[str, Any]],
+    clients: Optional[Sequence[str]],
+) -> list[str]:
+    if clients is not None:
+        return _ordered_report_clients(clients)
+
+    result = []
+    for client in [*design_by_client.keys(), *df["client"].dropna().astype(str).drop_duplicates().tolist()]:
+        if client not in result:
+            result.append(client)
+    return _ordered_report_clients(result)
+
+
+def _design_reality_header_row(variations: Sequence[Any]) -> str:
+    sample_colspan = max(len(variations), 1)
+    return _row([
+        _cell("Platform", background=HEADER_COLOR, bold=True, rowspan=2, align="left"),
+        _cell("Type", background=HEADER_COLOR, bold=True, rowspan=2, align="left"),
+        _cell("Duration (days)", background=HEADER_COLOR, bold=True, rowspan=2, align="left"),
+        _cell("Sample size", background=HEADER_COLOR, bold=True, colspan=sample_colspan, align="left"),
+        _cell("Other", background=HEADER_COLOR, bold=True, rowspan=2, align="left"),
+    ])
+
+
+def _design_reality_variations_header_row(variations: Sequence[Any]) -> str:
+    values = variations or [""]
+    return _row([
+        _cell(_design_reality_variation_label(variation), background=HEADER_COLOR, bold=True, align="left")
+        for variation in values
+    ])
+
+
+def _design_reality_client_rows(
+    client: str,
+    design: Mapping[str, Any],
+    experiment_df: pd.DataFrame,
+    variations: Sequence[Any],
+    *,
+    actual_duration_days: Any,
+    thousands_separator: bool,
+    srm_alpha: float,
+) -> list[str]:
+    variation_values = list(variations) or [""]
+    design_duration = _number_or_none(design.get("duration_days"))
+    design_sample_size = _number_or_none(design.get("sample_size"))
+    actual_duration = _number_or_none(actual_duration_days)
+    experiment_samples = {
+        row["variation"]: _number_or_none(row["sample_size"])
+        for _, row in experiment_df.iterrows()
+    }
+    sample_values = [experiment_samples.get(variation) for variation in variation_values]
+    duration_check_selected = (
+        actual_duration is not None
+        and design_duration is not None
+        and actual_duration >= design_duration
+    )
+    balance_check_selected = _design_reality_srm_passed(sample_values, srm_alpha=srm_alpha)
+
+    design_cells = [
+        _cell(client, background=HEADER_COLOR, bold=True, rowspan=3, align="left"),
+        _row_header_cell("Design"),
+        _cell(_format_design_reality_number(design_duration, thousands_separator=thousands_separator)),
+    ]
+    design_cells.extend(
+        _cell(_format_design_reality_number(design_sample_size, thousands_separator=thousands_separator))
+        for _ in variation_values
+    )
+    design_cells.append(_design_reality_other_cell())
+
+    experiment_cells = [
+        _row_header_cell("Experiment"),
+        _cell(_format_design_reality_number(actual_duration, thousands_separator=thousands_separator)),
+    ]
+    experiment_cells.extend(
+        _cell(_format_design_reality_number(experiment_samples.get(variation), thousands_separator=thousands_separator))
+        for variation in variation_values
+    )
+
+    checks_cells = [
+        _row_header_cell("Checks"),
+        _checkbox_cell(DESIGN_REALITY_DURATION_CHECK, duration_check_selected),
+        _checkbox_cell(DESIGN_REALITY_BALANCE_CHECK, balance_check_selected, colspan=len(variation_values)),
+    ]
+
+    return [
+        _row(design_cells),
+        _row(experiment_cells),
+        _row(checks_cells),
+    ]
+
+
+def _design_reality_variation_label(variation: Any) -> str:
+    if str(variation) == "1":
+        return "control"
+    if variation == "":
+        return ""
+    return f"variation {_format_variation(variation)}"
+
+
+def _design_reality_other_cell() -> str:
+    return _cell(
+        _checkbox_list([
+            (DESIGN_REALITY_NO_BUGS_CHECK, True),
+            (DESIGN_REALITY_NO_EXTERNAL_EFFECTS_CHECK, True),
+        ]),
+        rowspan=3,
+        raw=True,
+        align="left",
+    )
+
+
+def _checkbox_cell(label: str, selected: bool, *, colspan: int | None = None) -> str:
+    return _cell(
+        _checkbox_list([(label, selected)]),
+        colspan=colspan,
+        raw=True,
+        align="left",
+    )
+
+
+def _checkbox_list(items: Sequence[tuple[str, bool]]) -> str:
+    task_items = []
+    for label, selected in items:
+        task_items.extend([
+            "  <ac:task>",
+            f"    <ac:task-id>{uuid.uuid4()}</ac:task-id>",
+            f"    <ac:task-status>{'complete' if selected else 'incomplete'}</ac:task-status>",
+            f"    <ac:task-body>{escape(label)}</ac:task-body>",
+            "  </ac:task>",
+        ])
+    return "\n".join([
+        "<ac:task-list>",
+        *task_items,
+        "</ac:task-list>",
+    ])
+
+
+def _design_reality_srm_passed(sample_values: Sequence[float | None], *, srm_alpha: float) -> bool:
+    observed = [
+        float(value)
+        for value in sample_values
+        if value is not None and math.isfinite(float(value))
+    ]
+    if len(observed) != len(sample_values) or len(observed) < 2:
+        return False
+    if any(value < 0 for value in observed) or sum(observed) <= 0:
+        return False
+
+    expected = [sum(observed) / len(observed)] * len(observed)
+    pvalue = float(scipy_stats.chisquare(f_obs=observed, f_exp=expected).pvalue)
+    return pvalue >= float(srm_alpha)
+
+
+def _format_design_reality_number(value: Any, *, thousands_separator: bool) -> str:
+    formatted_value = _format_int_value(value)
+    if formatted_value == "":
+        return ""
+    if thousands_separator:
+        formatted_value = _add_thousands_separator(formatted_value)
+    return formatted_value
+
+
+def _first_present_value(values: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in values:
+            return values[key]
+    return None
 
 
 def _build_client_table(
@@ -1337,6 +1676,14 @@ def _experiment_dates(exp_info: Mapping[str, Any]) -> tuple[datetime.date, datet
     if date_end_ts <= date_start_ts:
         return date_start, datetime.datetime.now(datetime.timezone.utc).date()
     return date_start, datetime.datetime.fromtimestamp(date_end_ts, datetime.timezone.utc).date()
+
+
+def _experiment_duration_days(exp_info: Mapping[str, Any]) -> int:
+    date_start_ts = int(exp_info["date_start"])
+    date_end_ts = int(exp_info["date_end"])
+    if date_end_ts <= date_start_ts:
+        date_end_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    return max(0, int(math.ceil((date_end_ts - date_start_ts) / 86400)))
 
 
 def _rollout_impact_expected_users(impact_df: pd.DataFrame, client: str) -> float | None:
