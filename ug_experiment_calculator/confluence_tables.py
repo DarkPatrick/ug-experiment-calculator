@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import datetime
 from html import escape
 from pathlib import Path
 import uuid
@@ -76,6 +77,13 @@ ROLLOUT_IMPACT_TITLE = "Forecast (per day)"
 ROLLOUT_IMPACT_MEMBERS_STAT = "members"
 ROLLOUT_IMPACT_INSTALL_STAT = "install_cnt"
 DEFAULT_ROLLOUT_IMPACT_STATS: tuple[str, ...] = ("subscriptions_cnt", "charge_cnt", "revenue")
+CLIENT_SORT_ORDER: tuple[str, ...] = (
+    "UG_WEB",
+    "UGT_IOS",
+    "UG_IOS",
+    "UGT_ANDROID",
+    "UG_ANDROID",
+)
 
 
 @dataclass(frozen=True)
@@ -300,6 +308,148 @@ def get_rollout_impact_confluence_table_code(
     )
 
 
+def get_experiment_confluence_report_code(
+    exp_id: int,
+    *,
+    clients: Optional[Sequence[str]] = None,
+    segments: Optional[Sequence[str]] = None,
+    stats: Optional[Sequence[str]] = None,
+    stats_yaml_path: str | Path | None = None,
+    metrics_yaml_path: str | Path | None = None,
+    lookback_days: int = DEFAULT_IMPACT_LOOKBACK_DAYS,
+    date_end: Any = None,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    thousands_separator: bool = True,
+    update_split_users: bool = False,
+    ensure_experiment_users: bool = False,
+) -> str:
+    from .repository import get_experiment
+
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    exp_info = get_experiment(exp_id, config=cfg)
+    selected_clients = _ordered_report_clients(clients or exp_info.get("clients_list") or cfg.default_clients)
+
+    forecast_code = get_rollout_impact_confluence_table_code(
+        exp_id,
+        clients=selected_clients,
+        segment_name=TOTAL_SEGMENT,
+        stats=stats,
+        stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+        metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        domain="monetization",
+        subdomain=None,
+        lookback_days=lookback_days,
+        date_end=date_end,
+        config=cfg,
+        thousands_separator=thousands_separator,
+        update_split_users=update_split_users,
+        ensure_experiment_users=ensure_experiment_users,
+    )
+
+    client_blocks = {
+        client: {
+            "monetization_metrics": _get_report_metric_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+                domain="monetization",
+                subdomain=None,
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+            "retention_metrics": _get_report_metric_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+                domain="product",
+                subdomain="retention",
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+            "tab_metrics": _get_report_metric_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+                domain="product",
+                subdomain="tab",
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+            "monetization_stats": _get_report_stats_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+                domain="monetization",
+                subdomain=None,
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+            "retention_stats": _get_report_stats_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+                domain="product",
+                subdomain="retention",
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+            "tab_stats": _get_report_stats_table_code(
+                exp_id,
+                client=client,
+                segments=segments,
+                stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+                domain="product",
+                subdomain="tab",
+                config=cfg,
+                thousands_separator=thousands_separator,
+            ),
+        }
+        for client in selected_clients
+    }
+
+    date_start, report_date_end = _experiment_dates(exp_info)
+    return build_experiment_confluence_report_code(
+        exp_id,
+        date_start=date_start,
+        date_end=report_date_end,
+        exposure_event=str(exp_info.get("experiment_event_start") or ""),
+        forecast_code=forecast_code,
+        client_blocks=client_blocks,
+    )
+
+
+def build_experiment_confluence_report_code(
+    exp_id: int,
+    *,
+    date_start: Any,
+    date_end: Any,
+    exposure_event: str,
+    forecast_code: str,
+    client_blocks: Mapping[str, Mapping[str, str]],
+) -> str:
+    body_blocks = [
+        _date_range_paragraph(date_start, date_end),
+        _paragraph(_strong_text("Exposure event: ") + escape(str(exposure_event))),
+        _heading(2, "Decision"),
+        _heading(3, "Next steps"),
+        forecast_code,
+        _ui_expand("Design vs Reality check", ""),
+        _heading(2, "Significance analysis"),
+    ]
+
+    for client in _ordered_report_clients(client_blocks):
+        sections = client_blocks[client]
+        body_blocks.append(_ui_expand(str(client), _build_report_client_body(sections)))
+
+    body_blocks.append(_heading(2, "Insights"))
+    return _ui_expand(f"#{int(exp_id)}", "\n".join(body_blocks), expanded=True)
+
+
 def build_experiment_confluence_table_code(
     rows: pd.DataFrame | Iterable[Mapping[str, Any]],
     *,
@@ -308,30 +458,15 @@ def build_experiment_confluence_table_code(
     subdomain: str | None = None,
     thousands_separator: bool = True,
 ) -> str:
-    df = _prepare_table_rows(rows)
     cfg = ExperimentCalculatorConfig.from_env()
-    metric_configs = _load_metric_table_configs(metrics_yaml_path or cfg.metrics_yaml_path, domain=domain, subdomain=subdomain)
-
-    if df.empty or not metric_configs:
-        return _rollout_impact_table("")
-
-    client_names = _ordered_values(df["client"])
-    client_blocks = []
-    for client in client_names:
-        client_df = df[df["client"] == client].copy()
-        table_html = _build_client_table(
-            client_df,
-            metric_configs,
-            thousands_separator=thousands_separator,
-        )
-        if not table_html:
-            continue
-        if len(client_names) > 1:
-            client_blocks.append(_ui_expand(str(client), table_html))
-        else:
-            client_blocks.append(table_html)
-
-    return "\n".join(client_blocks)
+    table_html = _build_experiment_confluence_table_body(
+        rows,
+        metrics_yaml_path=metrics_yaml_path or cfg.metrics_yaml_path,
+        domain=domain,
+        subdomain=subdomain,
+        thousands_separator=thousands_separator,
+    )
+    return table_html or _rollout_impact_table("")
 
 
 def build_experiment_stats_confluence_table_code(
@@ -342,30 +477,15 @@ def build_experiment_stats_confluence_table_code(
     subdomain: str | None = None,
     thousands_separator: bool = True,
 ) -> str:
-    df = _prepare_stats_table_rows(rows)
     cfg = ExperimentCalculatorConfig.from_env()
-    stats_configs = _load_metric_table_configs(stats_yaml_path or cfg.stats_yaml_path, domain=domain, subdomain=subdomain)
-
-    if df.empty or not stats_configs:
-        return _ui_expand("Stats", _table([]))
-
-    client_names = _ordered_values(df["client"])
-    client_blocks = []
-    for client in client_names:
-        client_df = df[df["client"] == client].copy()
-        table_html = _build_stats_client_table(
-            client_df,
-            stats_configs,
-            thousands_separator=thousands_separator,
-        )
-        if not table_html:
-            continue
-        if len(client_names) > 1:
-            client_blocks.append(_ui_expand(str(client), table_html))
-        else:
-            client_blocks.append(table_html)
-
-    return _ui_expand("Stats", "\n".join(client_blocks) if client_blocks else _table([]))
+    table_html = _build_experiment_stats_confluence_table_body(
+        rows,
+        stats_yaml_path=stats_yaml_path or cfg.stats_yaml_path,
+        domain=domain,
+        subdomain=subdomain,
+        thousands_separator=thousands_separator,
+    )
+    return _ui_expand("Stats", table_html or _table([]))
 
 
 def build_rollout_impact_confluence_table_code(
@@ -435,6 +555,134 @@ def build_rollout_impact_confluence_table_code(
         rows.append(_row(cells))
 
     return _rollout_impact_table(_table(rows))
+
+
+def _get_report_metric_table_code(
+    exp_id: int,
+    *,
+    client: str,
+    segments: Optional[Sequence[str]],
+    metrics_yaml_path: str | Path,
+    domain: str,
+    subdomain: str | None,
+    config: ExperimentCalculatorConfig,
+    thousands_separator: bool,
+) -> str:
+    metric_configs = _load_metric_table_configs(metrics_yaml_path, domain=domain, subdomain=subdomain)
+    if not metric_configs:
+        return ""
+
+    rows = get_experiment_confluence_table_data(
+        exp_id,
+        clients=[client],
+        segments=segments,
+        metrics=[metric_config.name for metric_config in metric_configs],
+        config=config,
+    )
+    return _build_experiment_confluence_table_body(
+        rows,
+        metrics_yaml_path=metrics_yaml_path,
+        domain=domain,
+        subdomain=subdomain,
+        thousands_separator=thousands_separator,
+    )
+
+
+def _get_report_stats_table_code(
+    exp_id: int,
+    *,
+    client: str,
+    segments: Optional[Sequence[str]],
+    stats_yaml_path: str | Path,
+    domain: str,
+    subdomain: str | None,
+    config: ExperimentCalculatorConfig,
+    thousands_separator: bool,
+) -> str:
+    stats_configs = _load_metric_table_configs(stats_yaml_path, domain=domain, subdomain=subdomain)
+    if not stats_configs:
+        return ""
+
+    rows = get_experiment_stats_confluence_table_data(
+        exp_id,
+        clients=[client],
+        segments=segments,
+        metrics=[stats_config.name for stats_config in stats_configs],
+        config=config,
+    )
+    return _build_experiment_stats_confluence_table_body(
+        rows,
+        stats_yaml_path=stats_yaml_path,
+        domain=domain,
+        subdomain=subdomain,
+        thousands_separator=thousands_separator,
+    )
+
+
+def _build_experiment_confluence_table_body(
+    rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    *,
+    metrics_yaml_path: str | Path,
+    domain: str,
+    subdomain: str | None,
+    thousands_separator: bool,
+) -> str:
+    df = _prepare_table_rows(rows)
+    metric_configs = _load_metric_table_configs(metrics_yaml_path, domain=domain, subdomain=subdomain)
+
+    if df.empty or not metric_configs:
+        return ""
+
+    client_names = _ordered_values(df["client"])
+    client_blocks = []
+    for client in client_names:
+        client_df = df[df["client"] == client].copy()
+        table_html = _build_client_table(
+            client_df,
+            metric_configs,
+            thousands_separator=thousands_separator,
+        )
+        if not table_html:
+            continue
+        if len(client_names) > 1:
+            client_blocks.append(_ui_expand(str(client), table_html))
+        else:
+            client_blocks.append(table_html)
+
+    return "\n".join(client_blocks)
+
+
+def _build_experiment_stats_confluence_table_body(
+    rows: pd.DataFrame | Iterable[Mapping[str, Any]],
+    *,
+    stats_yaml_path: str | Path,
+    domain: str,
+    subdomain: str | None,
+    thousands_separator: bool,
+) -> str:
+    df = _prepare_stats_table_rows(rows)
+    stats_configs = _load_metric_table_configs(stats_yaml_path, domain=domain, subdomain=subdomain)
+
+    if df.empty or not stats_configs:
+        return ""
+
+    client_names = _ordered_values(df["client"])
+    client_blocks = []
+    for client in client_names:
+        client_df = df[df["client"] == client].copy()
+        table_html = _build_stats_client_table(
+            client_df,
+            stats_configs,
+            thousands_separator=thousands_separator,
+        )
+        if not table_html:
+            continue
+        if len(client_names) > 1:
+            client_blocks.append(_ui_expand(str(client), table_html))
+        else:
+            client_blocks.append(table_html)
+
+    return "\n".join(client_blocks)
 
 
 def build_design_confluence_table_code(
@@ -1061,15 +1309,34 @@ def _rollout_impact_clients(stats_df: pd.DataFrame, impact_df: pd.DataFrame) -> 
 
 def _rollout_impact_client_sort_key(client: str) -> tuple[int, int, str]:
     client_text = str(client)
-    ordered_clients = {
-        "UG_WEB": (0, 0),
-        "UGT_IOS": (1, 0),
-        "UG_IOS": (1, 1),
-        "UGT_ANDROID": (2, 0),
-        "UG_ANDROID": (2, 1),
-    }
-    group, priority = ordered_clients.get(client_text, (3, 0))
+    ordered_clients = {client: (index, 0) for index, client in enumerate(CLIENT_SORT_ORDER)}
+    group, priority = ordered_clients.get(client_text, (len(CLIENT_SORT_ORDER), 0))
     return (group, priority, client_text)
+
+
+def _ordered_report_clients(clients: Iterable[Any]) -> list[str]:
+    result = []
+    for client in clients:
+        client_text = str(client)
+        if client_text not in result:
+            result.append(client_text)
+    return sorted(result, key=_report_client_sort_key)
+
+
+def _report_client_sort_key(client: str) -> tuple[int, int, str]:
+    client_text = str(client)
+    if client_text in CLIENT_SORT_ORDER:
+        return (0, CLIENT_SORT_ORDER.index(client_text), client_text)
+    return (1, 0, client_text)
+
+
+def _experiment_dates(exp_info: Mapping[str, Any]) -> tuple[datetime.date, datetime.date]:
+    date_start_ts = int(exp_info["date_start"])
+    date_end_ts = int(exp_info["date_end"])
+    date_start = datetime.datetime.fromtimestamp(date_start_ts, datetime.timezone.utc).date()
+    if date_end_ts <= date_start_ts:
+        return date_start, datetime.datetime.now(datetime.timezone.utc).date()
+    return date_start, datetime.datetime.fromtimestamp(date_end_ts, datetime.timezone.utc).date()
 
 
 def _rollout_impact_expected_users(impact_df: pd.DataFrame, client: str) -> float | None:
@@ -1689,11 +1956,66 @@ def _cell_attributes(
     return " " + " ".join(attributes) if attributes else ""
 
 
-def _ui_expand(title: str, body: str) -> str:
+def _build_report_client_body(sections: Mapping[str, str]) -> str:
+    stats_body = "\n".join([
+        _report_labeled_table("Monetization Stats", sections.get("monetization_stats", "")),
+        _report_labeled_table("Retention Stats", sections.get("retention_stats", "")),
+        _report_labeled_table("Long Tab View Stats", sections.get("tab_stats", "")),
+    ])
+    return "\n".join([
+        _report_labeled_table("Monetization Metrics", sections.get("monetization_metrics", "")),
+        _report_labeled_table("Retention Metrics", sections.get("retention_metrics", "")),
+        _report_labeled_table("Tab View Metrics", sections.get("tab_metrics", "")),
+        _ui_expand("Stats", stats_body),
+    ])
+
+
+def _report_labeled_table(label: str, body: str) -> str:
+    return "\n".join([
+        _paragraph(_strong_text(label)),
+        body or _table([]),
+    ])
+
+
+def _date_range_paragraph(date_start: Any, date_end: Any) -> str:
+    return _paragraph(
+        _date_picker(date_start)
+        + " - "
+        + _date_picker(date_end)
+    )
+
+
+def _date_picker(value: Any) -> str:
+    if isinstance(value, datetime.datetime):
+        value = value.date()
+    if isinstance(value, datetime.date):
+        date_text = value.strftime("%Y-%m-%d")
+    else:
+        date_text = str(value)
+    return f'<time datetime="{escape(date_text)}" />'
+
+
+def _heading(level: int, text: str) -> str:
+    level = min(max(int(level), 1), 6)
+    return f"<h{level}>{escape(text)}</h{level}>"
+
+
+def _paragraph(body: str) -> str:
+    return f"<p>{body}</p>"
+
+
+def _strong_text(text: str) -> str:
+    return f"<strong>{escape(text)}</strong>"
+
+
+def _ui_expand(title: str, body: str, *, expanded: bool = False) -> str:
     macro_id = str(uuid.uuid4())
+    parameters = [f'  <ac:parameter ac:name="title">{escape(title)}</ac:parameter>']
+    if expanded:
+        parameters.append('  <ac:parameter ac:name="expanded">true</ac:parameter>')
     return "\n".join([
         f'<ac:structured-macro ac:name="ui-expand" ac:macro-id="{macro_id}">',
-        f'  <ac:parameter ac:name="title">{escape(title)}</ac:parameter>',
+        *parameters,
         "  <ac:rich-text-body>",
         body,
         "  </ac:rich-text-body>",
