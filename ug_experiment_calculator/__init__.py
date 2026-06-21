@@ -35,6 +35,7 @@ _EXPORTS = {
     "create_exp_results_table": ("repository", "create_exp_results_table"),
     "create_exp_stats_table": ("repository", "create_exp_stats_table"),
     "create_experiment_users_table": ("repository", "create_experiment_users_table"),
+    "create_experiment_users_slice_segments": ("repository", "create_experiment_users_slice_segments"),
     "create_experiments_subscription_table": ("repository", "create_experiments_subscription_table"),
     "drop_exp_partitions": ("repository", "drop_exp_partitions"),
     "drop_table": ("repository", "drop_table"),

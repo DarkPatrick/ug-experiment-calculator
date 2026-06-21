@@ -96,6 +96,7 @@ calculate_exp_info(123456, config=config)
 2. Парсит `clients_list`, `project` и `segments` из конфигурации эксперимента.
 3. Если `update_subscription_sources=True`, обновляет таблицы `subscriptions` и `subscriptions_transactions`.
 4. Для каждой пары `(client, segment)` создает или обновляет таблицу пользователей `exp_users_{exp_id}`.
+   Если в сегменте указан `slice`, создает derived-сегменты из уже готового users-cache без повторного скана сырых событий.
 5. Создает временную таблицу подписок `exp_subscription_{exp_id}_{session_id}`.
 6. Читает monetization-агрегаты через `monetization_metrics.sql`.
 7. Читает retention-агрегаты через `retention_metrics.sql` и подмешивает их к обычным метрикам.
@@ -119,6 +120,21 @@ calculate_exp_info(123456, config=config)
 | `exp_subscription_{exp_id}_{session_id}` | Временная таблица подписок для одного запуска расчета. |
 
 `exp_users_{exp_id}` переиспользуется между запусками. Если хэш сегмента изменился, строки этого сегмента удаляются и собираются заново.
+
+### Slice-сегменты
+
+В конфиге сегмента можно указать опциональный `slice` по полю, которое уже есть в `exp_users_{exp_id}`:
+
+```python
+segments: {
+    "Total": {
+        "pro_rights": "All",
+        "slice": "os",
+    },
+}
+```
+
+Пайплайн сначала считает базовый сегмент `Total`, затем материализует derived-сегменты из него через `insert select`: `Total - ios`, `Total - android`, и так далее для всех непустых значений `os`. Такие derived-сегменты проходят тот же расчет метрик, статистик и таблиц, но users не читаются повторно из raw events.
 
 Для `UG_WEB` экспериментов пайплайн различает desktop web и mobweb по `clients_options` и сегменту:
 

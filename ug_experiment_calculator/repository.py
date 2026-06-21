@@ -665,9 +665,19 @@ def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: o
         "platform": segment.get("platform", ""),
         "mobweb": segment.get("mobweb", False),
         "mobile_web": segment.get("mobile_web", False),
+        "slice": segment.get("slice", ""),
     }
     segment_json = json.dumps(user_filter_segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
+
+
+def get_segment_slice_field(segment: dict) -> str:
+    slice_config = segment.get("slice", "")
+    if isinstance(slice_config, str):
+        return slice_config.strip()
+    if isinstance(slice_config, dict):
+        return str(slice_config.get("field") or "").strip()
+    return ""
 
 
 EXP_USERS_COLUMNS = (
@@ -742,6 +752,10 @@ MOBWEB_APP_USERS_SCHEMA = """
 
 def _exp_users_insert_columns_sql() -> str:
     return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
+
+
+def _quoted_identifier(name: str) -> str:
+    return "`" + str(name).replace("`", "``") + "`"
 
 
 def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_hash: str) -> str:
@@ -1452,6 +1466,170 @@ def create_experiment_users_table(
         execute_sql_modify(query)
 
     return full_table_name
+
+
+def create_experiment_users_slice_segments(
+    exp_users_table: str,
+    client: str,
+    base_segment_name: str,
+    base_segment: dict,
+    base_segment_hash: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> list[tuple[str, dict, str]]:
+    cfg = get_config(config)
+    slice_field = get_segment_slice_field(base_segment)
+    if not slice_field:
+        return []
+    if not _table_has_column(exp_users_table, slice_field):
+        raise ValueError(f"Segment {base_segment_name!r} slice field {slice_field!r} does not exist in {exp_users_table}")
+
+    slice_identifier = _quoted_identifier(slice_field)
+    slice_values_query = f"""
+        select distinct
+            toString({slice_identifier}) as `slice_value`
+        from {exp_users_table}
+        where
+            `client` = {_clickhouse_string_literal(client)}
+        and
+            `segment` = {_clickhouse_string_literal(base_segment_name)}
+        and
+            `segment_hash` = {_clickhouse_string_literal(base_segment_hash)}
+        and
+            not empty(toString({slice_identifier}))
+        order by
+            `slice_value`
+    """
+    slice_values_df = execute_sql(slice_values_query)
+    slice_values = [str(value) for value in slice_values_df["slice_value"].dropna().tolist()]
+
+    derived_segments = []
+    for slice_value in slice_values:
+        derived_segment_name = f"{base_segment_name} - {slice_value}"
+        derived_segment = dict(base_segment)
+        derived_segment["slice"] = {
+            "field": slice_field,
+            "value": slice_value,
+        }
+        derived_segment_hash = get_segment_hash(derived_segment)
+        _ensure_exp_users_segment_hash(exp_users_table, client, derived_segment_name, derived_segment_hash, config=cfg)
+        _insert_experiment_users_slice_segment(
+            exp_users_table,
+            client,
+            base_segment_name,
+            base_segment_hash,
+            derived_segment_name,
+            derived_segment_hash,
+            slice_field,
+            slice_value,
+            config=cfg,
+        )
+        derived_segments.append((derived_segment_name, derived_segment, derived_segment_hash))
+
+    return derived_segments
+
+
+def _insert_experiment_users_slice_segment(
+    exp_users_table: str,
+    client: str,
+    base_segment_name: str,
+    base_segment_hash: str,
+    derived_segment_name: str,
+    derived_segment_hash: str,
+    slice_field: str,
+    slice_value: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    slice_identifier = _quoted_identifier(slice_field)
+    base_days_query = f"""
+        select distinct
+            toDate(`exp_start_dt`, 'UTC') as `dt`
+        from {exp_users_table}
+        where
+            `client` = {_clickhouse_string_literal(client)}
+        and
+            `segment` = {_clickhouse_string_literal(base_segment_name)}
+        and
+            `segment_hash` = {_clickhouse_string_literal(base_segment_hash)}
+        and
+            toString({slice_identifier}) = {_clickhouse_string_literal(slice_value)}
+        order by
+            `dt`
+    """
+    base_days_df = execute_sql(base_days_query)
+    for current_date in base_days_df["dt"].tolist():
+        current_day = _to_datetime_utc(current_date)
+        if not _should_insert_exp_users_day(exp_users_table, current_day, client, derived_segment_name, derived_segment_hash):
+            logger.info(
+                "Skipping users slice insert for client=%s, segment=%s, slice=%s, date=%s",
+                client,
+                derived_segment_name,
+                slice_value,
+                current_day.strftime("%Y-%m-%d"),
+            )
+            continue
+
+        select_columns = []
+        for column in EXP_USERS_COLUMNS:
+            if column == "client":
+                select_columns.append(f"{_clickhouse_string_literal(client)} as `client`")
+            elif column == "segment":
+                select_columns.append(f"{_clickhouse_string_literal(derived_segment_name)} as `segment`")
+            elif column == "segment_hash":
+                select_columns.append(f"{_clickhouse_string_literal(derived_segment_hash)} as `segment_hash`")
+            else:
+                select_columns.append(f"`base`.{_quoted_identifier(column)}")
+        select_columns_sql = ",\n            ".join(select_columns)
+        query = f"""
+            insert into {exp_users_table} ({_exp_users_insert_columns_sql()})
+            select
+                {select_columns_sql}
+            from
+                {exp_users_table} as `base`
+            left join
+                {exp_users_table} as `existing`
+            on
+                `base`.`unified_id` = `existing`.`unified_id`
+            and
+                `base`.`variation` = `existing`.`variation`
+            and
+                `existing`.`client` = {_clickhouse_string_literal(client)}
+            and
+                `existing`.`segment` = {_clickhouse_string_literal(derived_segment_name)}
+            and
+                `existing`.`segment_hash` = {_clickhouse_string_literal(derived_segment_hash)}
+            where
+                `base`.`client` = {_clickhouse_string_literal(client)}
+            and
+                `base`.`segment` = {_clickhouse_string_literal(base_segment_name)}
+            and
+                `base`.`segment_hash` = {_clickhouse_string_literal(base_segment_hash)}
+            and
+                toDate(`base`.`exp_start_dt`, 'UTC') = toDate('{current_day.strftime("%Y-%m-%d")}')
+            and
+                toString(`base`.{slice_identifier}) = {_clickhouse_string_literal(slice_value)}
+            and
+                `existing`.`unified_id` = 0
+        """
+        logger.info(
+            "Inserting experiment users slice segment client=%s, base_segment=%s, segment=%s, slice=%s, date=%s",
+            client,
+            base_segment_name,
+            derived_segment_name,
+            slice_value,
+            current_day.strftime("%Y-%m-%d"),
+        )
+        execute_sql_modify(query)
+
+
+def _to_datetime_utc(value: object) -> datetime.datetime:
+    if isinstance(value, datetime.datetime):
+        return value.astimezone(datetime.timezone.utc)
+    if isinstance(value, datetime.date):
+        return datetime.datetime(value.year, value.month, value.day, tzinfo=datetime.timezone.utc)
+    return datetime.datetime.strptime(str(value)[:10], "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
 
 
 def create_experiments_subscription_table(
