@@ -478,5 +478,6 @@ def calculate_exp_info(
     if update_rollout:
         logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
         update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
+        logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"

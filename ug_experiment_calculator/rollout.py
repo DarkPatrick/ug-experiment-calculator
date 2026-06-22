@@ -51,6 +51,16 @@ def calculate_rollout_share(
     segment = _segment_by_name(exp_info, segment_name)
 
     exp_start_dt, exp_end_dt = _experiment_interval(exp_info)
+    logger.info(
+        "Calculating rollout share for exp_id=%s, clients=%s, segment=%s, period=%s - %s, update_split_users=%s, ensure_experiment_users=%s",
+        exp_id,
+        selected_clients,
+        segment_name,
+        exp_start_dt.date(),
+        exp_end_dt.date(),
+        update_split_users,
+        ensure_experiment_users,
+    )
 
     exp_users_table = ""
     if ensure_experiment_users:
@@ -76,6 +86,12 @@ def calculate_rollout_share(
         config=cfg,
     )
     split_daily = get_rollout_split_users_daily(exp_id, selected_clients, config=cfg)
+    logger.info(
+        "Loaded rollout daily frames for exp_id=%s: experiment_daily_rows=%s, split_daily_rows=%s",
+        exp_id,
+        len(experiment_daily),
+        len(split_daily),
+    )
 
     return build_rollout_share_frame(
         experiment_daily,
@@ -101,6 +117,17 @@ def calculate_rollout_impact_estimate(
     selected_clients = list(clients or exp_info.get("clients_list") or cfg.default_clients)
     period_end = date_end or (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1))
     period_start = period_end - datetime.timedelta(days=lookback_days - 1)
+    logger.info(
+        "Calculating rollout impact estimate for exp_id=%s, clients=%s, segment=%s, lookback_days=%s, recent_users_period=%s - %s, update_split_users=%s, ensure_experiment_users=%s",
+        exp_id,
+        selected_clients,
+        segment_name,
+        lookback_days,
+        period_start,
+        period_end,
+        update_split_users,
+        ensure_experiment_users,
+    )
 
     rollout_share = calculate_rollout_share(
         exp_id,
@@ -111,6 +138,7 @@ def calculate_rollout_impact_estimate(
         config=cfg,
     )
     latest_share = _latest_rollout_share_by_client(rollout_share)
+    logger.info("Loaded latest rollout share for exp_id=%s: rows=%s", exp_id, len(latest_share))
     recent_users = get_recent_client_users_daily(
         exp_info,
         selected_clients,
@@ -118,6 +146,7 @@ def calculate_rollout_impact_estimate(
         date_end=period_end,
         config=cfg,
     )
+    logger.info("Loaded recent users for rollout impact estimate: rows=%s", len(recent_users))
 
     average_users = _recent_users_average_frame(recent_users, lookback_days=lookback_days)
     result = pd.DataFrame({"client": selected_clients}).merge(
@@ -129,7 +158,7 @@ def calculate_rollout_impact_estimate(
     result["average_daily_users"] = result["average_daily_users"].fillna(0)
     result["experiment_share"] = pd.to_numeric(result["experiment_share"], errors="coerce")
     result["expected_affected_users"] = result["average_daily_users"] * result["experiment_share"]
-    return result[
+    result = result[
         [
             "client",
             "average_daily_users",
@@ -137,6 +166,8 @@ def calculate_rollout_impact_estimate(
             "expected_affected_users",
         ]
     ]
+    logger.info("Calculated rollout impact estimate for exp_id=%s:\n%s", exp_id, result.to_string(index=False))
+    return result
 
 
 def get_recent_client_users_daily(
