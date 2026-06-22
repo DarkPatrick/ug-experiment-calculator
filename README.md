@@ -105,6 +105,7 @@ calculate_exp_info(123456, config=config)
 10. Считает pairwise-статистику, где контрольная вариация всегда `1`.
 11. Перезаписывает партиции текущего `exp_id/client/segment` в результирующих таблицах.
 12. Удаляет временную таблицу подписок.
+13. Если `update_rollout=True`, обновляет rollout split-users таблицы `rollout_split_users_{exp_id}` и `ug_exp_rollout_split_users`, которые используются forecast-блоком.
 
 Если таблица результата еще не существует, она создается по схеме датафрейма. Если существует, пакет удаляет только партиции текущего эксперимента, платформы и сегмента, а затем вставляет свежие строки.
 
@@ -598,7 +599,7 @@ results_df, stats_df = build_latest_experiment_summary_tables(
 from ug_experiment_calculator import calculate_exp_info
 ```
 
-- `calculate_exp_info(exp_id, config=None)` - полный расчет одного эксперимента.
+- `calculate_exp_info(exp_id, config=None, update_rollout=True)` - полный расчет одного эксперимента. По умолчанию дополнительно обновляет rollout split-users данные для forecast-блока; для отключения передайте `update_rollout=False`.
 
 ### Конфигурация
 

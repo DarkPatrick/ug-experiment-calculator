@@ -39,6 +39,7 @@ from .repository import (
     update_exp_results_table,
     update_subscription_source_tables,
 )
+from .rollout import update_rollout_split_users_daily
 
 
 logger = logging.getLogger(__name__)
@@ -406,6 +407,7 @@ def calculate_exp_info(
     exp_id,
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
+    update_rollout: bool = True,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame], dict[str, pd.DataFrame], str]:
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
@@ -472,5 +474,9 @@ def calculate_exp_info(
                     product_metrics_segments=product_metrics_segments,
                     config=cfg,
                 )
+
+    if update_rollout:
+        logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
+        update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"
