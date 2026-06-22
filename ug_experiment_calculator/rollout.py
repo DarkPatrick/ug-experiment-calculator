@@ -483,7 +483,15 @@ def _delete_rollout_split_users(
             `dt` between toDate('{date_start:%Y-%m-%d}') and toDate('{date_end:%Y-%m-%d}')
         settings mutations_sync = 1
     """
+    logger.info(
+        "Deleting rollout split users aggregate for exp_id=%s, clients=%s, period=%s - %s",
+        exp_id,
+        list(clients),
+        date_start,
+        date_end,
+    )
     execute_sql_modify(query)
+    logger.info("Finished deleting rollout split users aggregate for exp_id=%s", exp_id)
 
 
 def _refresh_rollout_split_users_daily(
@@ -531,6 +539,7 @@ def _refresh_rollout_split_users_daily(
         date_end,
     )
     execute_sql_modify(query)
+    logger.info("Finished refreshing rollout split users daily aggregate for exp_id=%s", exp_id)
 
 
 def _rollout_split_users_daily_query(
