@@ -352,16 +352,12 @@ def get_experiment_confluence_report_code(
         update_split_users=update_split_users,
         ensure_experiment_users=ensure_experiment_users,
     )
-    design_reality_check_code = (
-        get_design_reality_check_confluence_table_code(
-            exp_id,
-            design_reality_check,
-            clients=selected_clients,
-            config=cfg,
-            thousands_separator=thousands_separator,
-        )
-        if design_reality_check is not None
-        else ""
+    design_reality_check_code = get_design_reality_check_confluence_table_code(
+        exp_id,
+        design_reality_check or {},
+        clients=selected_clients,
+        config=cfg,
+        thousands_separator=thousands_separator,
     )
 
     client_blocks = {
@@ -602,7 +598,7 @@ def build_rollout_impact_confluence_table_code(
     )
     metric_configs = _rollout_impact_metric_configs(df, stats_configs, stats)
 
-    if df.empty or impact_df.empty or not metric_configs:
+    if df.empty or not metric_configs:
         return _rollout_impact_table("")
 
     df = df[df["segment"] == str(segment_name)].copy()
@@ -612,6 +608,13 @@ def build_rollout_impact_confluence_table_code(
     variations = _rollout_impact_variations(latest_df)
     if latest_df.empty or not variations:
         return _rollout_impact_table("")
+
+    if impact_df.empty:
+        impact_clients = _ordered_values(latest_df["client"])
+        impact_df = pd.DataFrame({
+            "client": impact_clients,
+            "expected_affected_users": [None] * len(impact_clients),
+        })
 
     clients = _rollout_impact_clients(latest_df, impact_df)
     if not clients:
@@ -929,8 +932,8 @@ def _design_reality_client_rows(
     srm_alpha: float,
 ) -> list[str]:
     variation_values = list(variations) or [""]
-    design_duration = _number_or_none(design.get("duration_days"))
-    design_sample_size = _number_or_none(design.get("sample_size"))
+    design_duration = _design_reality_design_number(design, "duration_days")
+    design_sample_size = _design_reality_design_number(design, "sample_size")
     actual_duration = _number_or_none(actual_duration_days)
     experiment_samples = {
         row["variation"]: _number_or_none(row["sample_size"])
@@ -995,6 +998,11 @@ def _design_reality_other_cell() -> str:
         raw=True,
         align="left",
     )
+
+
+def _design_reality_design_number(design: Mapping[str, Any], key: str) -> float:
+    value = _number_or_none(design.get(key))
+    return 0 if value is None else value
 
 
 def _checkbox_cell(label: str, selected: bool, *, colspan: int | None = None) -> str:

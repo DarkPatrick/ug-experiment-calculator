@@ -558,7 +558,7 @@ table_code = get_design_reality_check_confluence_table_code(
 
 `Duration (days)` и `Sample size` описывают дизайн эксперимента. `Sample size` считается одинаковым на вариацию и подставляется во все variation-колонки. Реальные значения `Experiment` читаются из `ug_exp_stats` по метрике `members` в сегменте `Total`, длительность берется из метаданных эксперимента. В строке `Checks` duration чекбокс отмечается, если реальная длительность не меньше дизайна; sample-size чекбокс отмечается, если проходит SRM-check против равномерного сплита.
 
-В полном Confluence-блоке эксперимента тот же словарь можно передать в `get_experiment_confluence_report_code(..., design_reality_check=...)`, и таблица будет вставлена внутрь expand `Design vs Reality check`.
+В полном Confluence-блоке эксперимента тот же словарь можно передать в `get_experiment_confluence_report_code(..., design_reality_check=...)`, и таблица будет вставлена внутрь expand `Design vs Reality check`. Если `design_reality_check` не передан, expand все равно содержит таблицу, а дизайн-длительность и дизайн-sample size считаются равными `0`.
 
 ## Latest summary DataFrame
 
