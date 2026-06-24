@@ -35,6 +35,7 @@ from .rollout import DEFAULT_IMPACT_LOOKBACK_DAYS
 from .value_formatting import (
     apply_number_affixes,
     format_diff_percent,
+    format_integer_value,
     format_metric_number,
     format_pvalue,
     number_or_none,
@@ -1054,12 +1055,7 @@ def _design_reality_srm_passed(sample_values: Sequence[float | None], *, srm_alp
 
 
 def _format_design_reality_number(value: Any, *, thousands_separator: bool) -> str:
-    formatted_value = _format_int_value(value)
-    if formatted_value == "":
-        return ""
-    if thousands_separator:
-        formatted_value = _add_thousands_separator(formatted_value)
-    return formatted_value
+    return format_integer_value(value, thousands_separator=thousands_separator)
 
 
 def _first_present_value(values: Mapping[str, Any], *keys: str) -> Any:
@@ -1488,9 +1484,7 @@ def _rollout_impact_experiment_start_cell(
     if row_type == "diff":
         return _cell("")
 
-    value = _format_int_value(expected_users)
-    if value and thousands_separator:
-        value = _add_thousands_separator(value)
+    value = format_integer_value(expected_users, thousands_separator=thousands_separator)
     return _cell(value)
 
 
@@ -1843,20 +1837,16 @@ def _format_design_table_value(
     if row_name in {"Sample size (per variation)", "Duration (days)"}:
         return _format_design_integer(value, thousands_separator=thousands_separator)
 
-    formatted_value = format_metric_number(value)
+    formatted_value = format_metric_number(value, thousands_separator=thousands_separator)
     if formatted_value == "":
         return _format_text(value)
-    if thousands_separator:
-        formatted_value = _add_thousands_separator(formatted_value)
     return formatted_value
 
 
 def _format_design_baseline(value: Any, *, metric: Any, thousands_separator: bool) -> str:
-    formatted_value = format_metric_number(value)
+    formatted_value = format_metric_number(value, thousands_separator=thousands_separator)
     if formatted_value == "":
         return _format_text(value)
-    if thousands_separator:
-        formatted_value = _add_thousands_separator(formatted_value)
 
     prefix, suffix = _design_baseline_affixes(metric)
     return apply_number_affixes(formatted_value, prefix=prefix, suffix=suffix)
@@ -1901,14 +1891,7 @@ def _format_raw_design_link(value: str) -> str:
 
 
 def _format_design_integer(value: Any, *, thousands_separator: bool) -> str:
-    number_value = number_or_none(value)
-    if number_value is None:
-        return _format_text(value)
-
-    formatted_value = str(int(round(number_value)))
-    if thousands_separator:
-        formatted_value = _add_thousands_separator(formatted_value)
-    return formatted_value
+    return format_integer_value(value, default=_format_text(value), thousands_separator=thousands_separator)
 
 
 def _pad_design_values(values: list[str], value_count: int) -> list[str]:
@@ -2126,11 +2109,9 @@ def _format_metric_table_value(
     *,
     thousands_separator: bool,
 ) -> str:
-    formatted_value = format_metric_number(value)
+    formatted_value = format_metric_number(value, thousands_separator=thousands_separator)
     if formatted_value == "":
         return ""
-    if thousands_separator:
-        formatted_value = _add_thousands_separator(formatted_value)
     return apply_number_affixes(formatted_value, prefix=metric_config.prefix, suffix=metric_config.suffix)
 
 
@@ -2141,57 +2122,24 @@ def _format_stats_table_value(
     thousands_separator: bool,
 ) -> str:
     if stats_config.value_type == "int":
-        formatted_value = _format_int_value(value)
+        formatted_value = format_integer_value(value, thousands_separator=thousands_separator)
         if formatted_value == "":
             return ""
-        if thousands_separator:
-            formatted_value = _add_thousands_separator(formatted_value)
         return apply_number_affixes(formatted_value, prefix=stats_config.prefix, suffix=stats_config.suffix)
 
     return _format_metric_table_value(value, stats_config, thousands_separator=thousands_separator)
 
 
 def _format_int_value(value: Any) -> str:
-    number_value = _number_or_none(value)
-    if number_value is None:
-        return ""
-    return str(int(round(number_value)))
+    return format_integer_value(value)
 
 
 def _format_diff_percent(value: Any, *, thousands_separator: bool) -> str:
-    formatted_value = format_diff_percent(value)
-    if formatted_value == "" or not thousands_separator:
-        return formatted_value
-    number_part, percent_sign = formatted_value.removesuffix("%"), "%"
-    return f"{_add_thousands_separator(number_part)}{percent_sign}"
+    return format_diff_percent(value, thousands_separator=thousands_separator)
 
 
 def _format_pvalue(value: Any, *, thousands_separator: bool) -> str:
-    formatted_value = format_pvalue(value)
-    if formatted_value == "" or not thousands_separator:
-        return formatted_value
-    return _add_thousands_separator(formatted_value)
-
-
-def _add_thousands_separator(value: str) -> str:
-    value = str(value)
-    sign = ""
-    if value.startswith("-"):
-        sign = "-"
-        value = value[1:]
-
-    integer_part, dot, fractional_part = value.partition(".")
-    if not integer_part.isdigit():
-        return f"{sign}{value}"
-
-    groups = []
-    while len(integer_part) > 3:
-        groups.append(integer_part[-3:])
-        integer_part = integer_part[:-3]
-    groups.append(integer_part)
-
-    grouped_integer = ",".join(reversed(groups))
-    return f"{sign}{grouped_integer}{dot}{fractional_part}"
+    return format_pvalue(value, thousands_separator=thousands_separator)
 
 
 def _format_variation(value: Any) -> str:
