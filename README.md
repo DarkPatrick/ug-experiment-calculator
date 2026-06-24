@@ -220,6 +220,7 @@ arpu, $:
 | `platforms` | Web-platform bucket: `all`, `desktop` (`platform=1`), `mobile` (`platform>1`), `phone` (`platform=2`), `tablet` (`platform=3`). |
 | `domain` | Группа для генераторов таблиц и графиков: `monetization` или `product`. Если поле отсутствует, используется `monetization`. |
 | `description` | Человекочитаемое описание. |
+| `include_in_summary` | Если `false`, метрика считается и сохраняется, но не попадает в стандартные Confluence/summary-таблицы. По умолчанию `true`. |
 
 Чтобы добавить новую метрику:
 
@@ -458,7 +459,7 @@ table_code = get_experiment_confluence_table_code(
 - `pvalue` - `pvalue`;
 - `cumulatives` - два Confluence Chart macro друг под другом: cumulative p-value и cumulative diff по датам.
 
-Колонки метрик берутся из `metrics.yaml`: только метрики с `table_position > 0`, порядок по `table_position`. Поле `positive` управляет раскраской p-value:
+Колонки метрик берутся из `metrics.yaml`: только метрики с `table_position > 0` и без `include_in_summary: false`, порядок по `table_position`. Поле `positive` управляет раскраской p-value:
 
 - `pvalue >= 0.05`: `#fffae6`;
 - значимый хороший эффект: `#e3fcef`;
@@ -508,7 +509,7 @@ stats_table_code = get_experiment_stats_confluence_table_code(
 - `Variation N` - последнее значение variation `N`;
 - `cumulatives` - один Confluence Chart macro `250x250` с накопленными значениями статистики по дням, серии сгруппированы по вариациям, ось дат ограничена двумя отсечками.
 
-Колонки статистик берутся из `stats.yaml`: только элементы с `table_position > 0`, порядок по `table_position`. Заголовок использует `display_name`, если он задан. Значения используют те же правила форматирования, `prefix` и `suffix`, что и таблица метрик.
+Колонки статистик берутся из `stats.yaml`: только элементы с `table_position > 0` и без `include_in_summary: false`, порядок по `table_position`. Заголовок использует `display_name`, если он задан. Значения используют те же правила форматирования, `prefix` и `suffix`, что и таблица метрик.
 
 Из готовых строк:
 
@@ -574,7 +575,7 @@ results_df, stats_df = get_latest_experiment_summary_tables(exp_id=123456)
 
 `stats_df` читается из `ug_exp_stats` и содержит строки `client`, `segment`, `metric`, `description`, `variation`, `value`.
 
-Обе таблицы сортируются по `client`, `segment`, `table_position` и variation-полю, все значения возвращаются строками. `results_df` фильтруется и форматируется через `metrics.yaml`, `stats_df` - через `stats.yaml`; строки с `table_position <= 0`, отсутствующие в конфиге или не разрешенные для источника через `sources`, не попадают в результат. В колонке `metric` выводится `display_name` из конфига, если он задан. Поле `color` в `results_df` использует ту же p-value раскраску, что Confluence-таблица.
+Обе таблицы сортируются по `client`, `segment`, `table_position` и variation-полю, все значения возвращаются строками. `results_df` фильтруется и форматируется через `metrics.yaml`, `stats_df` - через `stats.yaml`; строки с `table_position <= 0`, `include_in_summary: false`, отсутствующие в конфиге или не разрешенные для источника через `sources`, не попадают в результат. В колонке `metric` выводится `display_name` из конфига, если он задан. Поле `color` в `results_df` использует ту же p-value раскраску, что Confluence-таблица.
 
 Из готовых строк:
 

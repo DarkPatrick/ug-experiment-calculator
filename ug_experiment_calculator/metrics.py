@@ -207,6 +207,13 @@ def normalize_metric_config(metric_items: list[dict]) -> dict:
     return config
 
 
+def config_included_in_summary(config: dict) -> bool:
+    value = config.get("include_in_summary", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
 def _parse_config_value(value: object) -> object:
     if isinstance(value, str):
         for parser in (yaml.safe_load,):
@@ -384,10 +391,6 @@ def stats_columns_for_client(
 
     for stat_name, stat_items in stats_config.items():
         stat_config = normalize_metric_config(stat_items)
-        table_position = int(stat_config.get("table_position") or 0)
-        if table_position <= 0:
-            continue
-
         if not config_enabled_for_domain(stat_config, domain):
             continue
         if not config_enabled_for_subdomain(stat_config, subdomain):

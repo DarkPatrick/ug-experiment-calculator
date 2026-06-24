@@ -11,6 +11,20 @@ arpu, $:
   - positive: 1
   - prefix: "$"
 
+lifetime_arpu, $:
+  - domain: "monetization"
+  - numerator: lifetime_revenue
+  - denominator: members
+  - percentage: false
+  - variance: lifetime_arpu_var
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average lifetime revenue per user"
+  - table_position: 1
+  - include_in_summary: false
+  - positive: 1
+  - prefix: "$"
+
 aov, $:
   - domain: "monetization"
   - numerator: revenue

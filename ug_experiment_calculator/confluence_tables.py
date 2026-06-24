@@ -24,7 +24,13 @@ from .confluence_charts import (
     build_metric_confluence_lift_chart_code,
     build_stat_confluence_chart_code,
 )
-from .metrics import config_enabled_for_domain, config_enabled_for_subdomain, load_metrics_config, normalize_metric_config
+from .metrics import (
+    config_enabled_for_domain,
+    config_enabled_for_subdomain,
+    config_included_in_summary,
+    load_metrics_config,
+    normalize_metric_config,
+)
 from .rollout import DEFAULT_IMPACT_LOOKBACK_DAYS
 from .value_formatting import (
     apply_number_affixes,
@@ -1546,6 +1552,8 @@ def _rollout_impact_significance_metric_configs(
             continue
         if not config_enabled_for_subdomain(metric_config, subdomain):
             continue
+        if not config_included_in_summary(metric_config):
+            continue
         numerator = str(metric_config.get("numerator") or "")
         table_position = int(metric_config.get("table_position") or 0)
         if not numerator or table_position <= 0:
@@ -1959,6 +1967,8 @@ def _load_metric_table_configs(
         if not config_enabled_for_domain(metric_config, domain):
             continue
         if not config_enabled_for_subdomain(metric_config, subdomain):
+            continue
+        if not config_included_in_summary(metric_config):
             continue
         table_position = int(metric_config.get("table_position") or 0)
         if table_position <= 0:

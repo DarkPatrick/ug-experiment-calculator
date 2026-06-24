@@ -125,6 +125,17 @@ revenue:
   - table_position: 14
   - prefix: "$"
 
+lifetime_revenue:
+  - domain: "monetization"
+  - type: int
+  - display_name: "Lifetime Revenue, $"
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "lifetime revenue from subscriptions"
+  - table_position: 14
+  - include_in_summary: false
+  - prefix: "$"
+
 cancel_14d_cnt:
   - domain: "monetization"
   - type: int

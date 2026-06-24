@@ -13,7 +13,13 @@ from .colors import (
     PVALUE_POSITIVE_COLOR,
 )
 from .config import ExperimentCalculatorConfig
-from .metrics import config_enabled_for_domain, config_enabled_for_subdomain, load_metrics_config, normalize_metric_config
+from .metrics import (
+    config_enabled_for_domain,
+    config_enabled_for_subdomain,
+    config_included_in_summary,
+    load_metrics_config,
+    normalize_metric_config,
+)
 from .value_formatting import (
     apply_number_affixes,
     format_diff_percent,
@@ -348,6 +354,8 @@ def _load_summary_item_configs(
         if not config_enabled_for_domain(item_config, domain):
             continue
         if not config_enabled_for_subdomain(item_config, subdomain):
+            continue
+        if not config_included_in_summary(item_config):
             continue
         table_position = int(item_config.get("table_position") or 0)
         if table_position <= 0:
