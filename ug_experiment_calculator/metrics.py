@@ -57,6 +57,10 @@ def calc_cumulative_aggregates(df: pd.DataFrame) -> pd.DataFrame:
             "count_col": "members",
             "revenue_col": "subscriptions_cnt",
         },
+        "intros_per_user_var": {
+            "count_col": "members",
+            "revenue_col": "access_intro_cnt",
+        },
         "charges_per_user_var": {
             "count_col": "members",
             "revenue_col": "charge_cnt",

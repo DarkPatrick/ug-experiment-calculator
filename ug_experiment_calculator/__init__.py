@@ -58,6 +58,7 @@ _EXPORTS = {
     "get_experiment_stats_confluence_table_data": ("confluence_tables", "get_experiment_stats_confluence_table_data"),
     "get_design_reality_check_confluence_table_code": ("confluence_tables", "get_design_reality_check_confluence_table_code"),
     "get_exps_list": ("repository", "get_exps_list"),
+    "get_experiment_users_hash": ("repository", "get_experiment_users_hash"),
     "get_funnel_metrics": ("repository", "get_funnel_metrics"),
     "get_latest_experiment_summary_tables": ("summary_tables", "get_latest_experiment_summary_tables"),
     "get_monetization_metrics": ("repository", "get_monetization_metrics"),

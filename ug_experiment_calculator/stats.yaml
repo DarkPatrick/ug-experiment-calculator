@@ -79,6 +79,15 @@ access_trial_cnt:
   - description: "number of trial subscriptions"
   - table_position: 9
 
+access_intro_cnt:
+  - domain: "monetization"
+  - type: int
+  - display_name: "Intro Accesses"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "number of annual intro accesses merged into the original trial subscription"
+  - table_position: 10
+
 charged_trial_cnt:
   - domain: "monetization"
   - type: int
@@ -86,7 +95,7 @@ charged_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charged trial subscriptions"
-  - table_position: 10
+  - table_position: 11
 
 any_charged_trial_cnt:
   - domain: "monetization"
@@ -95,7 +104,7 @@ any_charged_trial_cnt:
   - sources: ["UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charged trial subscriptions or converted to instant offer"
-  - table_position: 11
+  - table_position: 12
 
 charge_cnt:
   - domain: "monetization"
@@ -104,7 +113,7 @@ charge_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charges"
-  - table_position: 12
+  - table_position: 13
 
 buyer_cnt:
   - domain: "monetization"
@@ -113,7 +122,7 @@ buyer_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of buyers"
-  - table_position: 13
+  - table_position: 14
 
 revenue:
   - domain: "monetization"
@@ -122,7 +131,7 @@ revenue:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "revenue from charges"
-  - table_position: 14
+  - table_position: 15
   - prefix: "$"
 
 lifetime_revenue:
@@ -132,7 +141,7 @@ lifetime_revenue:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "lifetime revenue from subscriptions"
-  - table_position: 14
+  - table_position: 15
   - include_in_summary: false
   - prefix: "$"
 
@@ -143,7 +152,7 @@ cancel_14d_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charges cancelled within 14 days since payment date"
-  - table_position: 15
+  - table_position: 16
 
 refund_14d_cnt:
   - domain: "monetization"
@@ -152,7 +161,7 @@ refund_14d_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charges who got refund within 14 days since payment date"
-  - table_position: 16
+  - table_position: 17
 
 pending_trial_cnt:
   - domain: "monetization"
@@ -161,7 +170,7 @@ pending_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of trial subscriptions with payment date after today and not charged yet"
-  - table_position: 17
+  - table_position: 18
 
 pending_14d_charge_cnt:
   - domain: "monetization"
@@ -170,7 +179,7 @@ pending_14d_charge_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charges occured earlier than 14 days ago"
-  - table_position: 18
+  - table_position: 19
 
 active_trial_cnt:
   - domain: "monetization"
@@ -179,7 +188,7 @@ active_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of trial subscriptions started before experiment"
-  - table_position: 19
+  - table_position: 20
 
 active_charged_trial_cnt:
   - domain: "monetization"
@@ -188,7 +197,7 @@ active_charged_trial_cnt:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "number of charged trial subscriptions started before experiment"
-  - table_position: 20
+  - table_position: 21
 
 web_retention_1d_cnt:
   - domain: "product"
@@ -198,7 +207,7 @@ web_retention_1d_cnt:
   - sources: ["UG_WEB"]
   - platforms: ["all"]
   - description: "number of web members retained within 24-48 hours since experiment start"
-  - table_position: 21
+  - table_position: 22
 
 web_retention_7d_cnt:
   - domain: "product"
@@ -208,7 +217,7 @@ web_retention_7d_cnt:
   - sources: ["UG_WEB"]
   - platforms: ["all"]
   - description: "number of web members retained within 24-192 hours since experiment start"
-  - table_position: 22
+  - table_position: 23
 
 web_retention_14d_cnt:
   - domain: "product"
@@ -218,7 +227,7 @@ web_retention_14d_cnt:
   - sources: ["UG_WEB"]
   - platforms: ["all"]
   - description: "number of web members retained within 24-360 hours since experiment start"
-  - table_position: 23
+  - table_position: 24
 
 app_retention_1d_cnt:
   - domain: "product"

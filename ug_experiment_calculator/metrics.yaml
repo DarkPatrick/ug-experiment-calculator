@@ -115,6 +115,18 @@ subscriptions per user:
   - table_position: 8
   - positive: 1
 
+intros per user:
+  - domain: "monetization"
+  - numerator: access_intro_cnt
+  - denominator: members
+  - percentage: false
+  - variance: intros_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of intro accesses per user"
+  - table_position: 9
+  - positive: 1
+
 charges per user:
   - domain: "monetization"
   - numerator: charge_cnt
@@ -124,7 +136,7 @@ charges per user:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "average number of charges per user"
-  - table_position: 9
+  - table_position: 10
   - positive: 1
 
 trials share, %:
@@ -136,7 +148,7 @@ trials share, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of trials among subscriptions"
-  - table_position: 10
+  - table_position: 11
   - positive: 1
   - suffix: "%"
 
@@ -149,7 +161,7 @@ trial -> charge, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
-  - table_position: 11
+  - table_position: 12
   - positive: 1
   - suffix: "%"
 
@@ -162,7 +174,7 @@ trial -> any charge, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
-  - table_position: 12
+  - table_position: 13
   - positive: 1
   - suffix: "%"
 
@@ -175,7 +187,7 @@ churn 14d, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of charges who churned within 14 days since payment date"
-  - table_position: 13
+  - table_position: 14
   - positive: 0
   - suffix: "%"
 
@@ -188,7 +200,7 @@ refund 14d, %:
   - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
   - platforms: ["all"]
   - description: "share of charges who got refund within 14 days since payment date"
-  - table_position: 14
+  - table_position: 15
   - positive: 0
   - suffix: "%"
 

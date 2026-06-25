@@ -26,7 +26,7 @@ select
         arrayEnumerate(`all_charges_arr`)
     ) as `all_charges_arr_uniq`,
     now() as `updated_at`,
-    toUInt16(6) as `source_version`
+    toUInt16(7) as `source_version`
 from (
     select
         `sub`.`subscription_id` as `subscription_id`,
@@ -41,6 +41,10 @@ from (
             toUnixTimestamp(`use`.`datetime`),
             toUnixTimestamp(`use`.`datetime`) >= `sub`.`subscribed_dt`
             and toUnixTimestamp(`use`.`datetime`) < `sub`.`next_subscribed_dt`
+            and (
+                `use`.`original_subscription_id` != ''
+                or `use`.`product_code` = `sub`.`product_code`
+            )
         ) as `datetime_ts`
     from (
         select
@@ -56,6 +60,7 @@ from (
     left join (
         select
             *,
+            `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`,
             toDate(`datetime`) as `event_date`,
             case
                 when `product_id` in ('com.ultimateguitar.tabs.plus.intro.1year', 'com.ultimateguitar.ugt.plus.intro.1year2', 'com.ultimateguitar.tabs.plus.1year7') then `usd_price` * 19.99/39.99
@@ -68,9 +73,11 @@ from (
             `event` in ('Charged', 'Canceled', 'Refunded', 'Crossgrade', 'Upgrade', 'Downgrade')
     ) as `use`
     on
-        `use`.`subscription_id` = `sub`.`subscription_id`
-    and
-        `use`.`product_code` = `sub`.`product_code`
+        if(
+            `use`.`original_subscription_id` != '',
+            `use`.`original_subscription_id`,
+            `use`.`subscription_id`
+        ) = `sub`.`subscription_id`
     group by
         `sub`.`subscription_id`,
         `sub`.`product_code`,

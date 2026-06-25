@@ -29,10 +29,10 @@ from .repository import (
     drop_table,
     ensure_table_columns,
     get_experiment,
+    get_experiment_users_hash,
     get_funnel_metrics,
     get_monetization_metrics,
     get_retention_metrics,
-    get_segment_hash,
     get_tab_view_metrics,
     get_user_filters_hash,
     is_mobweb_segment,
@@ -433,7 +433,7 @@ def calculate_exp_info(
 
     for client in exp_info["clients_list"]:
         for segment_name, segment in exp_info["segments"].items():
-            segment_hash = get_segment_hash(segment)
+            segment_hash = get_experiment_users_hash(exp_info, client, segment)
             logger.info("Calculating experiment info for exp_id=%s, client=%s, segment=%s", exp_id, client, segment_name)
             logger.info("Experiment info:\n%s", exp_info)
 
@@ -442,6 +442,7 @@ def calculate_exp_info(
             segment_items = [(segment_name, segment, segment_hash)]
             segment_items.extend(
                 create_experiment_users_slice_segments(
+                    exp_info,
                     exp_users_table,
                     client,
                     segment_name,

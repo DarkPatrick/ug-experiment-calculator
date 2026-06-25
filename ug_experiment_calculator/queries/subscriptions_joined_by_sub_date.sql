@@ -48,6 +48,7 @@ from (
         `use`.`payment_account_id_vector` as `payment_account_id_vector`,
         `use`.`service_name` as `service_name`,
         `use`.`duration_count` as `duration_count`,
+        `use`.`is_access_intro` as `is_access_intro`,
         `use`.`is_otp` as `is_otp`,
         ifNull(`trx`.`revenue_gross`, 0) as `revenue_gross`,
         ifNull(`trx`.`refund_revenue_gross`, 0) as `refund_revenue_gross`,

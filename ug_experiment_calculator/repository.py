@@ -29,7 +29,7 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 6
+SUBSCRIPTION_SOURCE_VERSION = 7
 
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
@@ -202,6 +202,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "access_instant_cnt",
         "access_ex_trial_cnt",
         "access_trial_cnt",
+        "access_intro_cnt",
         "trial_subscriber_cnt",
         "active_trial_cnt",
         "access_otp_cnt",
@@ -285,6 +286,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "lifetime_arpu_var",
         "arppu_var",
         "subscriptions_per_user_var",
+        "intros_per_user_var",
         "charges_per_user_var",
         "web_tab_view_events_per_user_var",
         "web_tab_view_60s_events_per_user_var",
@@ -669,6 +671,20 @@ def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: o
     }
     segment_json = json.dumps(user_filter_segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
+
+
+def get_experiment_users_hash(exp_info: dict, client: str, segment: dict) -> str:
+    clients_options = exp_info.get("clients_options", "")
+    users_cache_config = {
+        "user_filters_hash": get_user_filters_hash(segment, client=client, clients_options=clients_options),
+        "client": client,
+        "clients_options": clients_options,
+        "date_start": exp_info.get("date_start", 0),
+        "date_end": exp_info.get("date_end", 0),
+        "experiment_event_start": exp_info.get("experiment_event_start", ""),
+    }
+    users_cache_json = json.dumps(users_cache_config, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(users_cache_json.encode("utf-8")).hexdigest()
 
 
 def get_segment_slice_field(segment: dict) -> str:
@@ -1196,6 +1212,20 @@ def _ensure_payment_account_id_vector_column(table_name: str, *, config: Optiona
     return True
 
 
+def _ensure_is_access_intro_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    cfg = get_config(config)
+    if _table_has_column(table_name, "is_access_intro"):
+        return False
+
+    query = f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        add column if not exists `is_access_intro` UInt8 default 0 after `duration_count`
+    """
+    execute_sql_modify(query)
+    return True
+
+
 def _ensure_source_version_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
     if _table_has_column(table_name, "source_version"):
@@ -1273,6 +1303,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         _ensure_updated_at_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_payment_account_id_vector_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
+        needs_full_refresh = _ensure_is_access_intro_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_source_version_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _has_stale_source_version(cfg.subscriptions_table, config=cfg) or needs_full_refresh
 
@@ -1361,7 +1392,7 @@ def create_experiment_users_table(
     exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
     table_name = f"exp_users_{exp_id}"
     full_table_name = cfg.full_table(table_name)
-    segment_hash = get_segment_hash(segment)
+    segment_hash = get_experiment_users_hash(exp_info, client, segment)
     is_mobweb = client == "UG_WEB" and is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
 
     where_filter = segment.get("uwf", "1")
@@ -1469,6 +1500,7 @@ def create_experiment_users_table(
 
 
 def create_experiment_users_slice_segments(
+    exp_info: dict,
     exp_users_table: str,
     client: str,
     base_segment_name: str,
@@ -1511,7 +1543,7 @@ def create_experiment_users_slice_segments(
             "field": slice_field,
             "value": slice_value,
         }
-        derived_segment_hash = get_segment_hash(derived_segment)
+        derived_segment_hash = get_experiment_users_hash(exp_info, client, derived_segment)
         _ensure_exp_users_segment_hash(exp_users_table, client, derived_segment_name, derived_segment_hash, config=cfg)
         _insert_experiment_users_slice_segment(
             exp_users_table,

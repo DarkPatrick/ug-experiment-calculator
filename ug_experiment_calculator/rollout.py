@@ -17,8 +17,8 @@ from .repository import (
     create_experiment_users_table,
     create_table_sql,
     get_experiment,
+    get_experiment_users_hash,
     get_query,
-    get_segment_hash,
     is_mobweb_segment,
 )
 
@@ -79,6 +79,7 @@ def calculate_rollout_share(
 
     experiment_daily = get_experiment_users_daily(
         exp_id,
+        exp_info,
         exp_users_table,
         selected_clients,
         segment_name,
@@ -289,6 +290,7 @@ def get_rollout_split_users_daily(
 
 def get_experiment_users_daily(
     exp_id: int,
+    exp_info: dict,
     exp_users_table: str,
     clients: Iterable[str],
     segment_name: str,
@@ -296,9 +298,17 @@ def get_experiment_users_daily(
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
-    clients_sql = _clients_in_sql(clients)
+    selected_clients = list(clients)
+    clients_sql = _clients_in_sql(selected_clients)
     if not clients_sql:
         return pd.DataFrame(columns=["dt", "client", "experiment_users"])
+    client_hash_filters = " or ".join(
+        (
+            f"(`client` = {_clickhouse_string_literal(client)} "
+            f"and `segment_hash` = {_clickhouse_string_literal(get_experiment_users_hash(exp_info, client, segment))})"
+        )
+        for client in selected_clients
+    )
 
     query = f"""
         select
@@ -316,7 +326,7 @@ def get_experiment_users_daily(
             and
                 `segment` = {_clickhouse_string_literal(segment_name)}
             and
-                `segment_hash` = {_clickhouse_string_literal(get_segment_hash(segment))}
+                ({client_hash_filters})
             group by
                 `client`,
                 `unified_id`
