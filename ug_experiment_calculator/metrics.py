@@ -17,6 +17,12 @@ DEFAULT_METRIC_SUBDOMAIN = ""
 
 def fill_missing_variations_by_date(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    if df.empty:
+        for column in ("dt", "variation"):
+            if column not in df.columns:
+                df[column] = pd.Series(dtype="object")
+        return df
+
     df["dt"] = pd.to_datetime(df["dt"])
 
     all_dates = pd.date_range(df["dt"].min(), df["dt"].max(), freq="D")
@@ -38,6 +44,8 @@ def fill_missing_variations_by_date(df: pd.DataFrame) -> pd.DataFrame:
 def calc_cumulative_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     df = fill_missing_variations_by_date(df)
     df = df.copy()
+    if df.empty:
+        return df
     df["dt"] = pd.to_datetime(df["dt"])
 
     var_config = {
