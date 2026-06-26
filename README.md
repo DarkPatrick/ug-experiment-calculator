@@ -36,6 +36,7 @@ clickhouse-worker @ git+https://github.com/DarkPatrick/clickhouse-worker.git@mai
 ```
 
 Для реального запуска нужен доступ к ClickHouse и переменные окружения, которые ожидает `clickhouse_worker`.
+`ExperimentCalculatorConfig.from_env()` перед чтением окружения загружает ближайший `.env` от текущей рабочей директории; значения из `.env` имеют приоритет над уже выставленными переменными окружения.
 
 ## Быстрый старт
 
@@ -56,7 +57,8 @@ raw_metrics, cumulative_metric_values, pairwise_metric_results, debug_info = cal
 
 ## Конфигурация
 
-Конфигурация задается через `ExperimentCalculatorConfig` или переменные окружения с префиксом `EXPERIMENT_`.
+Конфигурация задается через `ExperimentCalculatorConfig`, `.env` или переменные окружения с префиксом `EXPERIMENT_`.
+При вызове `ExperimentCalculatorConfig.from_env()` ближайший `.env` от текущей рабочей директории загружается с приоритетом над `os.environ`, а если `.env` не найден, используются только текущие переменные окружения.
 
 ```python
 from ug_experiment_calculator import ExperimentCalculatorConfig, calculate_exp_info
@@ -608,7 +610,7 @@ from ug_experiment_calculator import calculate_exp_info
 from ug_experiment_calculator import ExperimentCalculatorConfig
 ```
 
-- `ExperimentCalculatorConfig.from_env()` - собрать конфиг из переменных окружения.
+- `ExperimentCalculatorConfig.from_env()` - собрать конфиг из `.env` и переменных окружения; при конфликте значение из `.env` имеет приоритет.
 - `config.full_table(name)` - получить полное имя таблицы с database и table_prefix.
 - `config.physical_table(name)` - получить физическое имя таблицы с table_prefix.
 

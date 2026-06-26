@@ -5,12 +5,85 @@ import datetime
 import os
 from pathlib import Path
 
+try:
+    from dotenv import find_dotenv, load_dotenv
+except ImportError:  # pragma: no cover - kept for editable installs before deps refresh
+    find_dotenv = None
+    load_dotenv = None
+
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 DEFAULT_QUERIES_DIR = PACKAGE_DIR / "queries"
 DEFAULT_METRICS_YAML_PATH = PACKAGE_DIR / "metrics.yaml"
 DEFAULT_STATS_YAML_PATH = PACKAGE_DIR / "stats.yaml"
 DEFAULT_FUNNELS_YAML_PATH = PACKAGE_DIR / "funnels.yaml"
+
+
+def _parse_fallback_dotenv_value(raw: str) -> str:
+    value = raw.strip()
+    if not value:
+        return ""
+
+    if value[0] in {"'", '"'}:
+        quote = value[0]
+        chars: list[str] = []
+        escaped = False
+        for char in value[1:]:
+            if escaped:
+                chars.append(char)
+                escaped = False
+                continue
+            if char == "\\" and quote == '"':
+                escaped = True
+                continue
+            if char == quote:
+                break
+            chars.append(char)
+        return "".join(chars)
+
+    return value.split(" #", 1)[0].strip()
+
+
+def _fallback_load_dotenv(dotenv_path: str | os.PathLike[str]) -> None:
+    path = Path(dotenv_path)
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key.removeprefix("export ").strip()
+        if not key:
+            continue
+        os.environ[key] = _parse_fallback_dotenv_value(raw_value)
+
+
+def _find_dotenv_from_cwd() -> str:
+    if find_dotenv is not None:
+        return find_dotenv(usecwd=True)
+
+    current_dir = Path.cwd()
+    for directory in (current_dir, *current_dir.parents):
+        dotenv_path = directory / ".env"
+        if dotenv_path.exists():
+            return str(dotenv_path)
+    return ""
+
+
+def _load_dotenv(dotenv_path: str | os.PathLike[str] | None = None) -> None:
+    path = str(dotenv_path) if dotenv_path is not None else _find_dotenv_from_cwd()
+    if not path:
+        return
+
+    if load_dotenv is not None:
+        load_dotenv(dotenv_path=path, override=True)
+        return
+
+    _fallback_load_dotenv(path)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -34,7 +107,13 @@ class ExperimentCalculatorConfig:
     update_subscription_sources: bool = False
 
     @classmethod
-    def from_env(cls, prefix: str = "EXPERIMENT_") -> "ExperimentCalculatorConfig":
+    def from_env(
+        cls,
+        prefix: str = "EXPERIMENT_",
+        dotenv_path: str | os.PathLike[str] | None = None,
+    ) -> "ExperimentCalculatorConfig":
+        _load_dotenv(dotenv_path)
+
         start_date = os.environ.get(f"{prefix}SUBSCRIPTIONS_START_DATE", "2011-06-01")
         queries_dir = os.environ.get(f"{prefix}QUERIES_DIR")
         metrics_yaml_path = os.environ.get(f"{prefix}METRICS_YAML_PATH")
