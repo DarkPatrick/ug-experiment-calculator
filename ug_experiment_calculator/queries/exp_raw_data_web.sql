@@ -50,6 +50,8 @@ and
 and
     `urew`.`unified_id` > 0
 and
+    not (lower(extractURLParameter(`urew`.`url`, 'utm_medium')) = 'crm' and lower(extractURLParameter(`urew`.`url`, 'utm_source')) = 'email')
+and
     (where_condition)
 and
     `variation` > 0
