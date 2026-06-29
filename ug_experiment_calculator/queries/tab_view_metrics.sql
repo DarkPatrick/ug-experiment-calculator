@@ -3,7 +3,7 @@ with
         select
             if(`aee`.`date_end` < `aee`.`date_start`, toDateTime(now()), toDateTime(`aee`.`date_end`))
         from
-            `mysql_u_guitarcom`.`ab_experiment_export` as `aee`
+            `mysql_u_guitarcom`.`ab_experiment` as `aee`
         where
             `aee`.`product` = 'UG'
         and

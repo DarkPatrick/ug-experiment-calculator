@@ -9,7 +9,7 @@ with
             `aee`.`date_start` as `date_start`,
             `aee`.`date_end` as `date_end`
         from
-            `mysql_u_guitarcom`.`ab_experiment_export` as `aee`
+            `mysql_u_guitarcom`.`ab_experiment` as `aee`
         where
             `aee`.`product` = 'UG'
         and
