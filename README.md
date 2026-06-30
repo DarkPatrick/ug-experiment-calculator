@@ -563,6 +563,8 @@ table_code = get_design_reality_check_confluence_table_code(
 
 В полном Confluence-блоке эксперимента тот же словарь можно передать в `get_experiment_confluence_report_code(..., design_reality_check=...)`, и таблица будет вставлена внутрь expand `Design vs Reality check`. Если `design_reality_check` не передан, expand все равно содержит таблицу, а дизайн-длительность и дизайн-sample size считаются равными `0`.
 
+Для forecast-блока полного отчета можно передать `get_experiment_confluence_report_code(..., daily_users_by_client={"UG_WEB": 12000, "UG_IOS": 8000})`; при валидных положительных значениях для всех выбранных клиентов они будут использованы вместо recent users в rollout forecast.
+
 ## Latest summary DataFrame
 
 Модуль `ug_experiment_calculator.summary_tables` возвращает две pandas-таблицы по последней доступной дате эксперимента.
@@ -688,15 +690,15 @@ from ug_experiment_calculator import (
 - `build_experiment_confluence_table_code(rows, metrics_yaml_path=..., domain="monetization")` - собрать Confluence storage table из готовых строк.
 - `get_experiment_stats_confluence_table_code(..., domain="monetization")` - прочитать `ug_exp_stats` и вернуть Confluence storage table для статистик внутри `ui-expand` `Stats`.
 - `build_experiment_stats_confluence_table_code(rows, stats_yaml_path=..., domain="monetization")` - собрать Confluence storage table для статистик из готовых строк.
-- `get_rollout_impact_confluence_table_code(..., domain="monetization")` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки.
-- `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=..., domain="monetization")` - собрать Confluence storage table с оценкой раскатки из готовых строк.
+- `get_rollout_impact_confluence_table_code(..., domain="monetization", daily_users_by_client=None)` - прочитать latest stats и rollout impact estimate и вернуть Confluence storage table с оценкой эффекта раскатки. `daily_users_by_client` можно передать как `{client: users_per_day}` или строки/`DataFrame` с колонками `client` и `average_daily_users` / `daily_users` / `users_per_day` / `users`; значения должны быть `> 0` для каждого выбранного клиента. Если формат невалидный или клиент пропущен, используется стандартный расчет через rollout recent users.
+- `build_rollout_impact_confluence_table_code(stats_rows, impact_rows, stats=..., domain="monetization")` - собрать Confluence storage table с оценкой раскатки из готовых строк. `impact_rows` принимает `expected_affected_users`, пару `average_daily_users` + `experiment_share`, а также простой формат `{client: users_per_day}` / колонку `users_per_day` для ручной сборки таблицы.
 - `build_design_confluence_table_code(platform_frames)` - собрать Confluence storage table по словарю датафреймов дизайна эксперимента.
 - `get_design_reality_check_confluence_table_code(exp_id, design_rows)` - прочитать actual sample size из `members` Total и собрать Confluence storage table для `Design vs Reality check`.
 - `build_design_reality_check_confluence_table_code(experiment_rows, design_rows, ...)` - собрать `Design vs Reality check` из готовых строк actual sample size.
 - `get_latest_experiment_summary_tables(..., domain="monetization")` - прочитать latest snapshot из `ug_exp_results` и `ug_exp_stats` и вернуть два отформатированных DataFrame.
 - `build_latest_experiment_summary_tables(results_rows, stats_rows, domain="monetization", ...)` - собрать latest summary DataFrame из готовых строк.
 - `calculate_rollout_share(exp_id, clients=None, segment_name="Total", ...)` - посчитать по дням и client cumulative-долю пользователей эксперимента среди всех пользователей, засплитованных в эксперимент. Первые попадания split-users сохраняются инкрементально по дням в `rollout_split_users_<exp_id>`, а дневные агрегаты - в `ug_exp_rollout_split_users`.
-- `calculate_rollout_impact_estimate(exp_id, clients=None, lookback_days=14, ...)` - оценить дневное число пользователей, на которых повлияет раскатка: среднее daily users за последние N полных дней с теми же client/platform/country filters умножается на финальную `experiment_share`.
+- `calculate_rollout_impact_estimate(exp_id, clients=None, lookback_days=14, daily_users_by_client=None, ...)` - оценить дневное число пользователей, на которых повлияет раскатка: среднее daily users за последние N полных дней с теми же client/platform/country filters умножается на финальную `experiment_share`. Если передан валидный `daily_users_by_client`, вместо recent users используются эти daily users по client; rollout share продолжает считаться стандартным путем.
 
 ### Форматирование значений
 

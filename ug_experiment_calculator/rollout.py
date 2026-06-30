@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import datetime
 import logging
-from typing import Iterable, Optional
+from collections.abc import Mapping
+from typing import Any, Iterable, Optional
 
 from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
 from clickhouse_worker import execute_sql, execute_sql_modify
@@ -111,6 +112,7 @@ def calculate_rollout_impact_estimate(
     date_end: Optional[datetime.date] = None,
     update_split_users: bool = False,
     ensure_experiment_users: bool = False,
+    daily_users_by_client: Any = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
     cfg = config or ExperimentCalculatorConfig.from_env()
@@ -140,16 +142,20 @@ def calculate_rollout_impact_estimate(
     )
     latest_share = _latest_rollout_share_by_client(rollout_share)
     logger.info("Loaded latest rollout share for exp_id=%s: rows=%s", exp_id, len(latest_share))
-    recent_users = get_recent_client_users_daily(
-        exp_info,
-        selected_clients,
-        date_start=period_start,
-        date_end=period_end,
-        config=cfg,
-    )
-    logger.info("Loaded recent users for rollout impact estimate: rows=%s", len(recent_users))
+    average_users = _daily_users_override_average_frame(daily_users_by_client, selected_clients)
+    if average_users is None:
+        recent_users = get_recent_client_users_daily(
+            exp_info,
+            selected_clients,
+            date_start=period_start,
+            date_end=period_end,
+            config=cfg,
+        )
+        logger.info("Loaded recent users for rollout impact estimate: rows=%s", len(recent_users))
+        average_users = _recent_users_average_frame(recent_users, lookback_days=lookback_days)
+    else:
+        logger.info("Using custom daily users for rollout impact estimate:\n%s", average_users.to_string(index=False))
 
-    average_users = _recent_users_average_frame(recent_users, lookback_days=lookback_days)
     result = pd.DataFrame({"client": selected_clients}).merge(
         average_users[["client", "average_daily_users"]],
         on="client",
@@ -764,6 +770,88 @@ def _recent_users_average_frame(recent_users: pd.DataFrame, *, lookback_days: in
     result = recent_users.groupby("client", as_index=False)["users"].sum()
     result["average_daily_users"] = pd.to_numeric(result["users"], errors="coerce").fillna(0) / lookback_days
     return result[["client", "average_daily_users"]]
+
+
+def _daily_users_override_average_frame(rows: Any, clients: Iterable[str]) -> pd.DataFrame | None:
+    selected_clients = [str(client) for client in clients]
+    if rows is None or not selected_clients:
+        return None
+
+    try:
+        df = _daily_users_override_frame(rows)
+    except Exception:
+        logger.warning("Ignoring invalid daily_users_by_client override")
+        return None
+
+    if df is None or df.empty or not {"client", "average_daily_users"}.issubset(df.columns):
+        logger.warning("Ignoring invalid daily_users_by_client override: expected client -> positive users per day")
+        return None
+
+    df = df[["client", "average_daily_users"]].copy()
+    df["client"] = df["client"].astype(str)
+    df["average_daily_users"] = pd.to_numeric(df["average_daily_users"], errors="coerce")
+    df = df[df["client"].isin(selected_clients)]
+    df = df.groupby("client", as_index=False)["average_daily_users"].sum()
+
+    values_by_client = dict(zip(df["client"], df["average_daily_users"]))
+    missing_clients = [client for client in selected_clients if client not in values_by_client]
+    invalid_clients = [
+        client
+        for client in selected_clients
+        if client in values_by_client
+        and (pd.isna(values_by_client[client]) or float(values_by_client[client]) <= 0)
+    ]
+    if missing_clients or invalid_clients:
+        logger.warning(
+            "Ignoring invalid daily_users_by_client override: missing_clients=%s invalid_clients=%s",
+            missing_clients,
+            invalid_clients,
+        )
+        return None
+
+    return pd.DataFrame({
+        "client": selected_clients,
+        "average_daily_users": [float(values_by_client[client]) for client in selected_clients],
+    })
+
+
+def _daily_users_override_frame(rows: Any) -> pd.DataFrame | None:
+    if isinstance(rows, pd.DataFrame):
+        return _daily_users_override_columns(rows.copy())
+
+    if isinstance(rows, Mapping):
+        records = []
+        for client, value in rows.items():
+            if isinstance(value, Mapping):
+                records.append({**value, "client": client})
+            else:
+                records.append({"client": client, "average_daily_users": value})
+        return _daily_users_override_columns(pd.DataFrame(records))
+
+    if isinstance(rows, str):
+        return None
+
+    try:
+        return _daily_users_override_columns(pd.DataFrame(list(rows)))
+    except TypeError:
+        return None
+
+
+def _daily_users_override_columns(df: pd.DataFrame) -> pd.DataFrame | None:
+    if df.empty or "client" not in df.columns:
+        return None
+
+    value_columns = (
+        "average_daily_users",
+        "daily_users",
+        "users_per_day",
+        "users",
+    )
+    value_column = next((column for column in value_columns if column in df.columns), None)
+    if value_column is None:
+        return None
+
+    return df.rename(columns={value_column: "average_daily_users"})[["client", "average_daily_users"]]
 
 
 def main() -> None:

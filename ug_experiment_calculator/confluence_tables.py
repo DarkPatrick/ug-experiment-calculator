@@ -269,6 +269,7 @@ def get_rollout_impact_confluence_table_code(
     thousands_separator: bool = True,
     update_split_users: bool = False,
     ensure_experiment_users: bool = False,
+    daily_users_by_client: Any = None,
 ) -> str:
     from .rollout import calculate_rollout_impact_estimate
 
@@ -305,6 +306,7 @@ def get_rollout_impact_confluence_table_code(
         date_end=date_end,
         update_split_users=update_split_users,
         ensure_experiment_users=ensure_experiment_users,
+        daily_users_by_client=daily_users_by_client,
         config=cfg,
     )
     return build_rollout_impact_confluence_table_code(
@@ -336,6 +338,7 @@ def get_experiment_confluence_report_code(
     thousands_separator: bool = True,
     update_split_users: bool = False,
     ensure_experiment_users: bool = False,
+    daily_users_by_client: Any = None,
 ) -> str:
     from .repository import get_experiment
 
@@ -358,6 +361,7 @@ def get_experiment_confluence_report_code(
         thousands_separator=thousands_separator,
         update_split_users=update_split_users,
         ensure_experiment_users=ensure_experiment_users,
+        daily_users_by_client=daily_users_by_client,
     )
     design_reality_check_code = get_design_reality_check_confluence_table_code(
         exp_id,
@@ -1574,7 +1578,15 @@ def _metric_config_sort_key(metric_config: _MetricTableConfig) -> tuple[int, int
 
 
 def _prepare_rollout_impact_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:
-    df = rows.copy() if isinstance(rows, pd.DataFrame) else pd.DataFrame(list(rows))
+    if isinstance(rows, pd.DataFrame):
+        df = rows.copy()
+    elif isinstance(rows, Mapping):
+        df = pd.DataFrame([
+            {"client": client, "expected_affected_users": value}
+            for client, value in rows.items()
+        ])
+    else:
+        df = pd.DataFrame(list(rows))
     if df.empty:
         return pd.DataFrame(columns=["client", "expected_affected_users"])
 
@@ -1589,6 +1601,10 @@ def _prepare_rollout_impact_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]
                 pd.to_numeric(df["average_daily_users"], errors="coerce")
                 * pd.to_numeric(df["experiment_share"], errors="coerce")
             )
+        elif "users_per_day" in df.columns:
+            df["expected_affected_users"] = df["users_per_day"]
+        elif "daily_users" in df.columns:
+            df["expected_affected_users"] = df["daily_users"]
         else:
             raise ValueError("Missing rollout impact column: expected_affected_users")
 
