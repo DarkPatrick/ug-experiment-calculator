@@ -3,20 +3,8 @@ with
     toDate('{date_filter}') as `date_filter`,
     {where_sql} as `where_condition`,
     {having_sql} as `having_condition`,
-    (
-        select distinct
-            toUInt32(`aee`.`id`) as `id`,
-            `aee`.`date_start` as `date_start`,
-            `aee`.`date_end` as `date_end`
-        from
-            `mysql_u_guitarcom`.`ab_experiment` as `aee`
-        where
-            `aee`.`product` = 'UG'
-        and
-            `aee`.`id` = `exp_id`
-        limit 1
-    ) as exp_data,
-    if(tupleElement(exp_data,3) < tupleElement(exp_data,2), toDateTime(now()), toDateTime(tupleElement(exp_data,3))) as `exp_end_dt`
+    toDateTime({exp_start_ts}) as `exp_window_start_dt`,
+    if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`
 
 select
     toInt64(`urew`.`unified_id`) as `unified_id`,
@@ -51,7 +39,7 @@ and
 where
     `urew`.`date` = `date_filter`
 and
-    `urew`.`datetime` between toDateTime(tupleElement(exp_data,2)) and `exp_end_dt`
+    `urew`.`datetime` between `exp_window_start_dt` and `exp_window_end_dt`
 and
     `urew`.`unified_id` > 0
 and

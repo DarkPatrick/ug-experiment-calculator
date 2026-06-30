@@ -1,15 +1,5 @@
 with
-    (
-        select
-            if(`aee`.`date_end` < `aee`.`date_start`, toDateTime(now()), toDateTime(`aee`.`date_end`))
-        from
-            `mysql_u_guitarcom`.`ab_experiment` as `aee`
-        where
-            `aee`.`product` = 'UG'
-        and
-            `aee`.`id` = {exp_id}
-        limit 1
-    ) as `exp_end_datetime`,
+    if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_end_datetime`,
     toDate(`exp_end_datetime`) as `exp_end_date`,
     `exp_users` as (
         select distinct

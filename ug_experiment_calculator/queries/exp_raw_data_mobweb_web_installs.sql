@@ -1,21 +1,9 @@
 with
     {exp_id} as `exp_id`,
     toDate('{date_filter}') as `date_filter`,
-    (
-        select distinct
-            toUInt32(`aee`.`id`) as `id`,
-            `aee`.`date_start` as `date_start`,
-            `aee`.`date_end` as `date_end`
-        from
-            `mysql_u_guitarcom`.`ab_experiment` as `aee`
-        where
-            `aee`.`product` = 'UG'
-        and
-            `aee`.`id` = `exp_id`
-        limit 1
-    ) as exp_data,
-    if(tupleElement(exp_data,3) < tupleElement(exp_data,2), toDateTime(now()), toDateTime(tupleElement(exp_data,3))) as `exp_end_dt`,
-    toDate(`exp_end_dt`) as `exp_end_date`
+    toDateTime({exp_start_ts}) as `exp_window_start_dt`,
+    if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`,
+    toDate(`exp_window_end_dt`) as `exp_window_end_date`
 
 select
     `wu`.`unified_id` as `unified_id`,
@@ -29,9 +17,9 @@ inner join
 on
     `urew`.`unified_id` = `wu`.`unified_id`
 where
-    `urew`.`date` between `date_filter` and `exp_end_date`
+    `urew`.`date` between `date_filter` and `exp_window_end_date`
 and
-    `urew`.`datetime` between toDateTime(`wu`.`exp_start_dt`) and `exp_end_dt`
+    `urew`.`datetime` between toDateTime(`wu`.`exp_start_dt`) and `exp_window_end_dt`
 and
     `urew`.`event` = 'App Install'
 and

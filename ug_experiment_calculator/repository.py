@@ -30,6 +30,7 @@ from .config import ExperimentCalculatorConfig
 
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 7
+EXPERIMENT_USERS_CACHE_VERSION = 2
 
 UG_WEB_CLIENT = "UG_WEB"
 UG_WEB_DESKTOP_CLIENT = "UG_WEB DESKTOP"
@@ -876,6 +877,13 @@ def _stable_config_hash(config: object) -> str:
     return hashlib.sha256(config_json.encode("utf-8")).hexdigest()
 
 
+def _experiment_time_params(exp_info: dict) -> dict[str, int]:
+    return {
+        "exp_start_ts": int(exp_info.get("date_start", 0) or 0),
+        "exp_end_ts": int(exp_info.get("date_end", 0) or 0),
+    }
+
+
 def get_segment_hash(segment: dict, *, exp_info: Optional[dict] = None, client: str = "") -> str:
     if exp_info is None:
         return _stable_config_hash(segment)
@@ -905,6 +913,7 @@ def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: o
 def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) -> dict:
     clients_options = exp_info.get("clients_options", "")
     return {
+        "cache_version": EXPERIMENT_USERS_CACHE_VERSION,
         "user_filters_hash": get_user_filters_hash(segment, client=client, clients_options=clients_options),
         "client": client,
         "clients_options": clients_options,
@@ -1127,7 +1136,7 @@ def _insert_mobweb_experiment_users_day(
         "client_sql": _clickhouse_string_literal(client),
         "segment_sql": _clickhouse_string_literal(segment_name),
         "segment_hash_sql": _clickhouse_string_literal(segment_hash),
-    }
+    } | _experiment_time_params(exp_info)
 
     web_users_table = _recreate_mobweb_stage_table(
         _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "web_users"),
@@ -1679,7 +1688,8 @@ def create_experiment_users_table(
                 "having_sql": having_filter,
                 "date_filter": exp_start_dt.strftime("%Y-%m-%d"),
                 "client": source_client,
-            },
+            }
+            | _experiment_time_params(exp_info),
             config=cfg,
         )
         query_part_2 = _wrap_exp_users_query(seed_query, client, segment_name, segment_hash)
@@ -1738,7 +1748,8 @@ def create_experiment_users_table(
                 "client_sql": _clickhouse_string_literal(client),
                 "segment_sql": _clickhouse_string_literal(segment_name),
                 "segment_hash_sql": _clickhouse_string_literal(segment_hash),
-            },
+            }
+            | _experiment_time_params(exp_info),
             config=cfg,
         )
         query = query_part_1 + "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
@@ -2067,7 +2078,8 @@ def get_tab_view_metrics(
             "web_event_platform_sql": web_event_platform_sql,
             "app_product_sample_sql": app_product_sample_sql,
             "app_product_sample_multiplier_sql": app_product_sample_multiplier_sql,
-        },
+        }
+        | _experiment_time_params(exp_info),
         config=config,
     )
     logger.info("tab view query:\n%s", query)

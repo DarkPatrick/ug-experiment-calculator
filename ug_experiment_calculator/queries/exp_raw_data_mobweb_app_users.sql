@@ -1,21 +1,9 @@
 with
     {exp_id} as `exp_id`,
     toDate('{app_date_filter}') as `app_date_filter`,
-    (
-        select distinct
-            toUInt32(`aee`.`id`) as `id`,
-            `aee`.`date_start` as `date_start`,
-            `aee`.`date_end` as `date_end`
-        from
-            `mysql_u_guitarcom`.`ab_experiment` as `aee`
-        where
-            `aee`.`product` = 'UG'
-        and
-            `aee`.`id` = `exp_id`
-        limit 1
-    ) as exp_data,
-    if(tupleElement(exp_data,3) < tupleElement(exp_data,2), toDateTime(now()), toDateTime(tupleElement(exp_data,3))) as `exp_end_dt`,
-    toDate(`exp_end_dt`) as `exp_end_date`
+    toDateTime({exp_start_ts}) as `exp_window_start_dt`,
+    if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`,
+    toDate(`exp_window_end_dt`) as `exp_window_end_date`
 
 select
     `wi`.`unified_id` as `unified_id`,
@@ -32,7 +20,7 @@ on
 where
     `urea`.`date` = `app_date_filter`
 and
-    `urea`.`datetime` between `wi`.`install_dt` - interval 5 minute and `exp_end_dt`
+    `urea`.`datetime` between `wi`.`install_dt` - interval 5 minute and `exp_window_end_dt`
 and
     `urea`.`unified_id` > 0
 and
