@@ -601,7 +601,7 @@ def build_design_reality_check_confluence_table_code(
                 srm_alpha=srm_alpha,
             )
         )
-    return _table(rows)
+    return _table(rows, header_row_count=2)
 
 
 def build_rollout_impact_confluence_table_code(
@@ -677,7 +677,7 @@ def build_rollout_impact_confluence_table_code(
             cells.extend(block[row_index])
         rows.append(_row(cells))
 
-    return _rollout_impact_table(_table(rows))
+    return _rollout_impact_table(_table(rows, header_row_count=2))
 
 
 def _get_report_metric_table_code(
@@ -836,7 +836,7 @@ def build_design_confluence_table_code(
             cells.extend(block[row_index])
         rows.append(_row(cells))
 
-    return _table(rows)
+    return _table(rows, header_row_count=3)
 
 
 def _prepare_design_reality_experiment_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:
@@ -1102,6 +1102,7 @@ def _build_client_table(
 
     rows = []
     segment_names = _ordered_segments(df["segment"])
+    header_row_count = 2 if segment_names and segment_names[0] != TOTAL_SEGMENT else 1
     for segment_index, segment in enumerate(segment_names):
         segment_df = df[df["segment"] == segment].copy()
         if segment_index > 0 or segment != TOTAL_SEGMENT:
@@ -1113,7 +1114,7 @@ def _build_client_table(
                 thousands_separator=thousands_separator,
             )
         )
-    return _table(rows)
+    return _table(rows, header_row_count=header_row_count)
 
 
 def _build_stats_client_table(
@@ -1129,6 +1130,7 @@ def _build_stats_client_table(
 
     rows = []
     segment_names = _ordered_segments(df["segment"])
+    header_row_count = 2 if segment_names and segment_names[0] != TOTAL_SEGMENT else 1
     for segment_index, segment in enumerate(segment_names):
         segment_df = df[df["segment"] == segment].copy()
         if segment_index > 0 or segment != TOTAL_SEGMENT:
@@ -1140,7 +1142,7 @@ def _build_stats_client_table(
                 thousands_separator=thousands_separator,
             )
         )
-    return _table(rows)
+    return _table(rows, header_row_count=header_row_count)
 
 
 def _build_segment_rows(
@@ -2314,14 +2316,29 @@ def _stats_sort_key(series: pd.Series) -> pd.Series:
     return series
 
 
-def _table(rows: list[str]) -> str:
-    return "\n".join([
-        "<table>",
+def _table(rows: list[str], *, header_row_count: int = 0) -> str:
+    header_row_count = min(max(int(header_row_count), 0), len(rows))
+    header_rows = [_as_table_header_row(row) for row in rows[:header_row_count]]
+    body_rows = rows[header_row_count:]
+
+    table_rows = ["<table>"]
+    if header_rows:
+        table_rows.extend([
+            "  <thead>",
+            *[f"    {row}" for row in header_rows],
+            "  </thead>",
+        ])
+    table_rows.extend([
         "  <tbody>",
-        *[f"    {row}" for row in rows],
+        *[f"    {row}" for row in body_rows],
         "  </tbody>",
         "</table>",
     ])
+    return "\n".join(table_rows)
+
+
+def _as_table_header_row(row: str) -> str:
+    return row.replace("<td", "<th").replace("</td>", "</th>")
 
 
 def _row(cells: list[str]) -> str:
