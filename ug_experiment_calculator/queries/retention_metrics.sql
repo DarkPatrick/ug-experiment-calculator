@@ -21,6 +21,16 @@ with
         from
             `exp_users`
     ),
+    `app_exp_users` as (
+        select
+            `eut`.*
+        from
+            `exp_users` as `eut`
+        where
+            `eut`.`app_retention_unified_id` > 0
+        and
+            {app_product_sample_sql}
+    ),
     `web_retention` as (
         select
             `eut`.`dt` as `dt`,
@@ -39,6 +49,8 @@ with
         and
             `urew`.`date` between (select `min_dt` from `date_bounds`) and (select `max_retention_dt` from `date_bounds`)
         and
+            {web_event_platform_sql}
+        and
             `urew`.`event` in ('Tab View', 'Home View')
         group by
             `dt`,
@@ -52,15 +64,13 @@ with
             uniqExactIf(`eut`.`unified_id`, `urea`.`datetime` between `eut`.`exp_start_datetime` + interval 24 hour and `eut`.`exp_start_datetime` + interval 192 hour) as `app_retention_7d_cnt`,
             uniqExactIf(`eut`.`unified_id`, `urea`.`datetime` between `eut`.`exp_start_datetime` + interval 24 hour and `eut`.`exp_start_datetime` + interval 360 hour) as `app_retention_14d_cnt`
         from
-            `exp_users` as `eut`
+            `app_exp_users` as `eut`
         inner join
             `default`.`ug_rt_events_app` as `urea`
         on
             `urea`.`unified_id` = `eut`.`app_retention_unified_id`
         where
             {calculate_app_retention_sql}
-        and
-            `eut`.`app_retention_unified_id` > 0
         and
             `urea`.`date` between (select `min_dt` from `date_bounds`) and (select `max_retention_dt` from `date_bounds`)
         and
@@ -76,12 +86,12 @@ select
     toUInt64(ifNull(`wr`.`web_retention_1d_cnt`, 0)) as `web_retention_1d_cnt`,
     toUInt64(ifNull(`wr`.`web_retention_7d_cnt`, 0)) as `web_retention_7d_cnt`,
     toUInt64(ifNull(`wr`.`web_retention_14d_cnt`, 0)) as `web_retention_14d_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_1d_cnt`, 0))) as `app_retention_1d_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_7d_cnt`, 0))) as `app_retention_7d_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_14d_cnt`, 0))) as `app_retention_14d_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`ar`.`app_retention_1d_cnt`, 0), 0)) as `mobweb_app_retention_1d_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`ar`.`app_retention_7d_cnt`, 0), 0)) as `mobweb_app_retention_7d_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`ar`.`app_retention_14d_cnt`, 0), 0)) as `mobweb_app_retention_14d_cnt`
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_1d_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_retention_1d_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_7d_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_retention_7d_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`ar`.`app_retention_14d_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_retention_14d_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`ar`.`app_retention_1d_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_retention_1d_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`ar`.`app_retention_7d_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_retention_7d_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`ar`.`app_retention_14d_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_retention_14d_cnt`
 from
     (
         select distinct

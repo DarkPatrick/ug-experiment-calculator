@@ -15,12 +15,18 @@ from .repository import (
     _collect_platform_values,
     _flatten_option_values,
     _parse_clients_options,
+    base_client_for_calculation,
     create_experiment_users_table,
     create_table_sql,
+    expand_experiment_clients,
     get_experiment,
     get_experiment_users_hash,
     get_query,
     is_mobweb_segment,
+    source_client_for_calculation,
+    UG_WEB_CLIENT,
+    UG_WEB_DESKTOP_CLIENT,
+    UG_WEB_MOBWEB_CLIENT,
 )
 
 
@@ -48,7 +54,9 @@ def calculate_rollout_share(
     """
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    selected_clients = list(clients or exp_info.get("clients_list") or cfg.default_clients)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(cfg.default_clients)
+    selected_clients = expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
     segment = _segment_by_name(exp_info, segment_name)
 
     exp_start_dt, exp_end_dt = _experiment_interval(exp_info)
@@ -117,7 +125,9 @@ def calculate_rollout_impact_estimate(
 ) -> pd.DataFrame:
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    selected_clients = list(clients or exp_info.get("clients_list") or cfg.default_clients)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(cfg.default_clients)
+    selected_clients = expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
     period_end = date_end or (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1))
     period_start = period_end - datetime.timedelta(days=lookback_days - 1)
     logger.info(
@@ -568,6 +578,7 @@ def _rollout_split_users_daily_query(
 ) -> str:
     exp_start_dt, exp_end_dt = _experiment_interval(exp_info)
     segment = _segment_by_name(exp_info, "Total")
+    source_client = source_client_for_calculation(client)
     events_table, alias, platform_filter = _split_events_source(
         client,
         segment,
@@ -582,6 +593,7 @@ def _rollout_split_users_daily_query(
             "date_start_ts": int(exp_start_dt.timestamp()),
             "date_end_ts": int(exp_end_dt.timestamp()),
             "client_sql": _clickhouse_string_literal(client),
+            "source_client_sql": _clickhouse_string_literal(source_client),
             "events_table": events_table,
             "alias": alias,
             "platform_filter": platform_filter,
@@ -592,7 +604,7 @@ def _rollout_split_users_daily_query(
 
 
 def _split_events_source(client: str, segment: dict, *, clients_options: object = "") -> tuple[str, str, str]:
-    if client == "UG_WEB":
+    if base_client_for_calculation(client) == UG_WEB_CLIENT:
         platform_filter = "and `urew`.`platform` > 1" if is_mobweb_segment(segment, clients_options, client) else "and `urew`.`platform` = 1"
         return "`default`.`ug_rt_events_web`", "urew", platform_filter
 
@@ -607,6 +619,7 @@ def _recent_client_users_daily_query(
     date_end: datetime.date,
     config: ExperimentCalculatorConfig,
 ) -> str:
+    source_client = source_client_for_calculation(client)
     client_options = _client_options(exp_info.get("clients_options", ""), client)
     events_table, alias, platform_filter = _recent_events_source(client, client_options)
     country_filter = _country_filter_sql(alias, _collect_country_values(client_options))
@@ -616,6 +629,7 @@ def _recent_client_users_daily_query(
             "date_start": date_start.strftime("%Y-%m-%d"),
             "date_end": date_end.strftime("%Y-%m-%d"),
             "client_sql": _clickhouse_string_literal(client),
+            "source_client_sql": _clickhouse_string_literal(source_client),
             "events_table": events_table,
             "alias": alias,
             "platform_filter": platform_filter,
@@ -626,12 +640,42 @@ def _recent_client_users_daily_query(
 
 
 def _recent_events_source(client: str, client_options: object) -> tuple[str, str, str]:
-    if client == "UG_WEB":
+    if client == UG_WEB_DESKTOP_CLIENT:
+        return "`default`.`ug_rt_events_web`", "urew", "and `urew`.`platform` = 1"
+    if client == UG_WEB_MOBWEB_CLIENT:
+        platform_values = _collect_platform_values(client_options)
+        platform_filter = _web_mobweb_platform_filter_sql("urew", platform_values)
+        return "`default`.`ug_rt_events_web`", "urew", platform_filter
+    if base_client_for_calculation(client) == UG_WEB_CLIENT:
         platform_values = _collect_platform_values(client_options)
         platform_filter = _web_platform_filter_sql("urew", platform_values)
         return "`default`.`ug_rt_events_web`", "urew", platform_filter
 
     return "`default`.`ug_rt_events_app`", "urea", ""
+
+
+def _web_mobweb_platform_filter_sql(alias: str, platform_values: list[object]) -> str:
+    mobile_values = []
+    for value in platform_values:
+        text = str(value).strip().lower()
+        if text in {"all", "mobile", "mobweb", "mobile_web", "mobile web", "mweb"}:
+            return f"and `{alias}`.`platform` > 1"
+        if text == "phone":
+            mobile_values.append(2)
+            continue
+        if text == "tablet":
+            mobile_values.append(3)
+            continue
+        try:
+            platform_id = int(text)
+        except ValueError:
+            continue
+        if platform_id > 1:
+            mobile_values.append(platform_id)
+    if not mobile_values:
+        return f"and `{alias}`.`platform` > 1"
+    values_sql = ", ".join(str(value) for value in sorted(set(mobile_values)))
+    return f"and `{alias}`.`platform` in ({values_sql})"
 
 
 def _web_platform_filter_sql(alias: str, platform_values: list[object]) -> str:
@@ -671,7 +715,7 @@ def _web_platform_filter_sql(alias: str, platform_values: list[object]) -> str:
 def _client_options(clients_options: object, client: str) -> object:
     parsed_options = _parse_clients_options(clients_options)
     if isinstance(parsed_options, dict):
-        return parsed_options.get(client, {})
+        return parsed_options.get(base_client_for_calculation(client), {})
     return {}
 
 

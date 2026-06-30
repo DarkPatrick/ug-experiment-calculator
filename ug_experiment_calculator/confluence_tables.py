@@ -91,6 +91,8 @@ ROLLOUT_IMPACT_MEMBERS_STAT = "members"
 ROLLOUT_IMPACT_INSTALL_STAT = "install_cnt"
 DEFAULT_ROLLOUT_IMPACT_STATS: tuple[str, ...] = ("subscriptions_cnt", "charge_cnt", "revenue")
 CLIENT_SORT_ORDER: tuple[str, ...] = (
+    "UG_WEB DESKTOP",
+    "UG_WEB MOBWEB",
     "UG_WEB",
     "UGT_IOS",
     "UG_IOS",
@@ -123,6 +125,7 @@ def get_experiment_confluence_table_data(
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
+    clients = _expand_report_query_clients(exp_id, clients, config=cfg)
     filters = [f"`exp_id` = {int(exp_id)}"]
     filters.extend(_in_filter("client", clients, _clickhouse_string_literal))
     filters.extend(_in_filter("segment", segments, _clickhouse_string_literal))
@@ -197,6 +200,7 @@ def get_experiment_stats_confluence_table_data(
     from clickhouse_worker import execute_sql
 
     cfg = config or ExperimentCalculatorConfig.from_env()
+    clients = _expand_report_query_clients(exp_id, clients, config=cfg)
     filters = [f"`exp_id` = {int(exp_id)}"]
     filters.extend(_in_filter("client", clients, _clickhouse_string_literal))
     filters.extend(_in_filter("segment", segments, _clickhouse_string_literal))
@@ -340,11 +344,15 @@ def get_experiment_confluence_report_code(
     ensure_experiment_users: bool = False,
     daily_users_by_client: Any = None,
 ) -> str:
-    from .repository import get_experiment
+    from .repository import expand_experiment_clients, get_experiment
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    selected_clients = _ordered_report_clients(clients or exp_info.get("clients_list") or cfg.default_clients)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(cfg.default_clients)
+    selected_clients = _ordered_report_clients(
+        expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+    )
 
     forecast_code = get_rollout_impact_confluence_table_code(
         exp_id,
@@ -524,11 +532,15 @@ def get_design_reality_check_confluence_table_code(
     thousands_separator: bool = True,
     srm_alpha: float = 0.001,
 ) -> str:
-    from .repository import get_experiment
+    from .repository import expand_experiment_clients, get_experiment
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    selected_clients = _ordered_report_clients(clients or exp_info.get("clients_list") or cfg.default_clients)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(cfg.default_clients)
+    selected_clients = _ordered_report_clients(
+        expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+    )
     variations = list(range(1, int(exp_info.get("variations") or 0) + 1))
     experiment_rows = get_experiment_stats_confluence_table_data(
         exp_id,
@@ -1686,6 +1698,23 @@ def _ordered_report_clients(clients: Iterable[Any]) -> list[str]:
         if client_text not in result:
             result.append(client_text)
     return sorted(result, key=_report_client_sort_key)
+
+
+def _expand_report_query_clients(
+    exp_id: int,
+    clients: Optional[Sequence[str]],
+    *,
+    config: ExperimentCalculatorConfig,
+) -> Optional[list[str]]:
+    if clients is None:
+        return None
+
+    from .repository import expand_experiment_clients, get_experiment
+
+    exp_info = get_experiment(exp_id, config=config)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(config.default_clients)
+    return expand_experiment_clients(exp_info, list(clients))
 
 
 def _report_client_sort_key(client: str) -> tuple[int, int, str]:

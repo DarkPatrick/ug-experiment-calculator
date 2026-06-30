@@ -34,7 +34,7 @@ where
     and
         ifNull(`saved`.`unified_id`, 0) = 0
     and
-        `{alias}`.`source` = {client_sql}
+        `{alias}`.`source` = {source_client_sql}
     and
         has(`{alias}`.`experiments.id`, `exp_id_value`)
     and

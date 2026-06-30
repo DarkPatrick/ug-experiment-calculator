@@ -10,6 +10,13 @@ import scipy.special as special
 import scipy.stats as scipy_stats
 import yaml
 
+from .repository import (
+    UG_WEB_CLIENT,
+    UG_WEB_DESKTOP_CLIENT,
+    UG_WEB_MOBWEB_CLIENT,
+    base_client_for_calculation,
+)
+
 
 DEFAULT_METRIC_DOMAIN = "monetization"
 DEFAULT_METRIC_SUBDOMAIN = ""
@@ -275,7 +282,19 @@ def _collect_platform_values(options: object) -> list[object]:
 
 
 def platform_buckets_for_context(client: str, segment: dict | None = None, clients_options: object = "") -> set[str]:
-    if client != "UG_WEB":
+    if client == UG_WEB_DESKTOP_CLIENT:
+        return {"desktop"}
+    if client == UG_WEB_MOBWEB_CLIENT:
+        parsed_options = _parse_config_value(clients_options)
+        if isinstance(parsed_options, dict):
+            parsed_options = parsed_options.get(UG_WEB_CLIENT, {})
+        platform_values = _collect_platform_values(parsed_options)
+        result = _web_platform_buckets(platform_values)
+        result.discard("desktop")
+        result.discard("all")
+        return result or {"mobile"}
+
+    if base_client_for_calculation(client) != UG_WEB_CLIENT:
         return {"all"}
 
     segment = segment or {}
@@ -291,6 +310,11 @@ def platform_buckets_for_context(client: str, segment: dict | None = None, clien
     if not platform_values:
         return {"mobile"}
 
+    result = _web_platform_buckets(platform_values)
+    return result or {"mobile"}
+
+
+def _web_platform_buckets(platform_values: list[object]) -> set[str]:
     result = set()
     for value in platform_values:
         text = str(value).strip().lower()
@@ -318,7 +342,7 @@ def platform_buckets_for_context(client: str, segment: dict | None = None, clien
             elif platform_id > 1:
                 result.add("mobile")
 
-    return result or {"mobile"}
+    return result
 
 
 def config_enabled_for_context(
@@ -329,7 +353,8 @@ def config_enabled_for_context(
     clients_options: object = "",
 ) -> bool:
     sources = config.get("sources", config.get("platforms", []))
-    if sources and client not in sources:
+    source_client = base_client_for_calculation(client)
+    if sources and client not in sources and source_client not in sources:
         return False
 
     platforms = config.get("platforms", ["all"])
@@ -338,6 +363,10 @@ def config_enabled_for_context(
 
     current_platforms = platform_buckets_for_context(client, segment=segment, clients_options=clients_options)
     return bool(current_platforms.intersection(set(platforms)))
+
+
+def _is_web_product_column(column: object, config: dict) -> bool:
+    return metric_config_domain(config) == "product" and str(column or "").startswith("web_")
 
 
 def metric_config_domain(config: dict) -> str:
@@ -358,6 +387,14 @@ def config_enabled_for_subdomain(config: dict, subdomain: str | None = None) -> 
     if subdomain is None:
         return True
     return metric_config_subdomain(config) == str(subdomain).strip().lower()
+
+
+def _uses_mobweb_product_sample(client: str, numerator_col: object, sample_rate: float) -> bool:
+    return (
+        client == UG_WEB_MOBWEB_CLIENT
+        and sample_rate < 1
+        and str(numerator_col or "").startswith("mobweb_app_")
+    )
 
 
 def metric_columns_for_client(
@@ -383,6 +420,8 @@ def metric_columns_for_client(
 
         for key in ("numerator", "denominator", "variance"):
             value = metric_config.get(key)
+            if client == UG_WEB_MOBWEB_CLIENT and _is_web_product_column(value, metric_config):
+                continue
             if value:
                 columns.add(value)
 
@@ -408,6 +447,8 @@ def stats_columns_for_client(
         if not config_enabled_for_subdomain(stat_config, subdomain):
             continue
         if not config_enabled_for_context(stat_config, client, segment=segment, clients_options=clients_options):
+            continue
+        if client == UG_WEB_MOBWEB_CLIENT and _is_web_product_column(stat_name, stat_config):
             continue
 
         columns.add(str(stat_name))
@@ -454,7 +495,8 @@ def funnel_calculation_enabled(funnel_config: dict) -> bool:
 
 def funnel_enabled_for_client(funnel_config: dict, client: str) -> bool:
     platforms = funnel_platforms(funnel_config)
-    return funnel_calculation_enabled(funnel_config) and client in platforms
+    source_client = base_client_for_calculation(client)
+    return funnel_calculation_enabled(funnel_config) and (client in platforms or source_client in platforms)
 
 
 def calc_stats(mean_0, mean_1, var_0, var_1, len_0, len_1, alpha=None, required_power=None, pvalue=None, calc_mean=False):
@@ -592,9 +634,13 @@ def calc_metrics_stats_by_variation_pairs(
     client: str = "",
     segment: dict | None = None,
     clients_options: object = "",
+    mobweb_product_metrics_sample_rate: float = 1.0,
     domain: str | None = None,
     subdomain: str | None = None,
 ) -> pd.DataFrame:
+    if mobweb_product_metrics_sample_rate <= 0:
+        raise ValueError("mobweb_product_metrics_sample_rate must be greater than 0")
+
     df = cumulative_df.copy()
     df["dt"] = pd.to_datetime(df["dt"])
     metrics_config = load_metrics_config(metrics_yaml_path)
@@ -610,6 +656,11 @@ def calc_metrics_stats_by_variation_pairs(
         variance_col = metric_config.get("variance")
         distribution = metric_config.get("distribution")
         is_percentage = metric_config.get("percentage", False)
+        uses_sample = _uses_mobweb_product_sample(
+            client,
+            numerator_col,
+            mobweb_product_metrics_sample_rate,
+        )
         if not config_enabled_for_domain(metric_config, domain):
             continue
         if not config_enabled_for_subdomain(metric_config, subdomain):
@@ -635,7 +686,7 @@ def calc_metrics_stats_by_variation_pairs(
             numerator_0 = control_row[numerator_col]
             denominator_0 = control_row[denominator_col]
             mean_0 = safe_divide(numerator_0, denominator_0)
-            len_0 = denominator_0
+            len_0 = denominator_0 * mobweb_product_metrics_sample_rate if uses_sample else denominator_0
 
             if pd.isna(mean_0) or pd.isna(len_0) or len_0 <= 0:
                 continue
@@ -658,7 +709,7 @@ def calc_metrics_stats_by_variation_pairs(
                 numerator_1 = test_row[numerator_col]
                 denominator_1 = test_row[denominator_col]
                 mean_1 = safe_divide(numerator_1, denominator_1)
-                len_1 = denominator_1
+                len_1 = denominator_1 * mobweb_product_metrics_sample_rate if uses_sample else denominator_1
 
                 if pd.isna(mean_1) or pd.isna(len_1) or len_1 <= 0:
                     continue

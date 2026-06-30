@@ -12,6 +12,6 @@ where
 and
     `{alias}`.`unified_id` > 0
 and
-    `{alias}`.`source` = {client_sql}
+    `{alias}`.`source` = {source_client_sql}
 {platform_filter}
 {country_filter}

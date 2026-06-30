@@ -32,6 +32,16 @@ with
         from
             `exp_users`
     ),
+    `app_exp_users` as (
+        select
+            `eut`.*
+        from
+            `exp_users` as `eut`
+        where
+            `eut`.`app_tab_view_unified_id` > 0
+        and
+            {app_product_sample_sql}
+    ),
     `web_event_counts` as (
         select
             `eut`.`dt` as `dt`,
@@ -55,6 +65,8 @@ with
                     {calculate_web_tab_view_sql}
                 and
                     `date` between (select `min_dt` from `date_bounds`) and `exp_end_date`
+                and
+                    {web_event_platform_sql}
                 and
                     `event` in ('Tab View', 'Tab View 60s', 'Tab View 120s', 'Tab View 180s', 'Tab View 300s', 'Tab View 600s')
             ) as `urew`
@@ -96,12 +108,10 @@ with
                     `event` in ('Tab View', 'Tab View 60s', 'Tab View 120s', 'Tab View 180s', 'Tab View 300s', 'Tab View 600s')
             ) as `urea`
         inner join
-            `exp_users` as `eut`
+            `app_exp_users` as `eut`
         on
             `urea`.`unified_id` = `eut`.`app_tab_view_unified_id`
         where
-            `eut`.`app_tab_view_unified_id` > 0
-        and
             `urea`.`datetime` between `eut`.`exp_start_datetime` and `exp_end_datetime`
         group by
             `dt`,
@@ -144,7 +154,7 @@ with
             ifNull(`aec`.`tab_view_300s_events_cnt`, 0) as `tab_view_300s_events_cnt`,
             ifNull(`aec`.`tab_view_600s_events_cnt`, 0) as `tab_view_600s_events_cnt`
         from
-            `exp_users` as `eut`
+            `app_exp_users` as `eut`
         left join
             `app_event_counts` as `aec`
         on
@@ -155,8 +165,6 @@ with
             `eut`.`unified_id` = `aec`.`unified_id`
         where
             {calculate_app_tab_view_sql}
-        and
-            `eut`.`app_tab_view_unified_id` > 0
     ),
     `web_tab_view_metrics` as (
         select
@@ -233,34 +241,34 @@ select
     ifNull(`wtv`.`tab_view_180s_events_per_user_var`, 0) as `web_tab_view_180s_events_per_user_var`,
     ifNull(`wtv`.`tab_view_300s_events_per_user_var`, 0) as `web_tab_view_300s_events_per_user_var`,
     ifNull(`wtv`.`tab_view_600s_events_per_user_var`, 0) as `web_tab_view_600s_events_per_user_var`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_60s_user_cnt`, 0))) as `app_tab_view_60s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_120s_user_cnt`, 0))) as `app_tab_view_120s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_180s_user_cnt`, 0))) as `app_tab_view_180s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_300s_user_cnt`, 0))) as `app_tab_view_300s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_600s_user_cnt`, 0))) as `app_tab_view_600s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_events_cnt`, 0))) as `app_tab_view_events_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_60s_events_cnt`, 0))) as `app_tab_view_60s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_120s_events_cnt`, 0))) as `app_tab_view_120s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_180s_events_cnt`, 0))) as `app_tab_view_180s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_300s_events_cnt`, 0))) as `app_tab_view_300s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_600s_events_cnt`, 0))) as `app_tab_view_600s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_60s_user_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_60s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_120s_user_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_120s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_180s_user_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_180s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_300s_user_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_300s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_600s_user_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_600s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_60s_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_60s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_120s_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_120s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_180s_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_180s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_300s_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_300s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_600s_events_cnt`, 0) * {app_product_sample_multiplier_sql}))) as `app_tab_view_600s_events_cnt`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_events_per_user_var`, 0)) as `app_tab_view_events_per_user_var`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_60s_events_per_user_var`, 0)) as `app_tab_view_60s_events_per_user_var`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_120s_events_per_user_var`, 0)) as `app_tab_view_120s_events_per_user_var`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_180s_events_per_user_var`, 0)) as `app_tab_view_180s_events_per_user_var`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_300s_events_per_user_var`, 0)) as `app_tab_view_300s_events_per_user_var`,
     if({is_web_client_sql}, 0, ifNull(`atv`.`tab_view_600s_events_per_user_var`, 0)) as `app_tab_view_600s_events_per_user_var`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_60s_user_cnt`, 0), 0)) as `mobweb_app_tab_view_60s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_120s_user_cnt`, 0), 0)) as `mobweb_app_tab_view_120s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_180s_user_cnt`, 0), 0)) as `mobweb_app_tab_view_180s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_300s_user_cnt`, 0), 0)) as `mobweb_app_tab_view_300s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_600s_user_cnt`, 0), 0)) as `mobweb_app_tab_view_600s_user_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_events_cnt`, 0), 0)) as `mobweb_app_tab_view_events_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_60s_events_cnt`, 0), 0)) as `mobweb_app_tab_view_60s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_120s_events_cnt`, 0), 0)) as `mobweb_app_tab_view_120s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_180s_events_cnt`, 0), 0)) as `mobweb_app_tab_view_180s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_300s_events_cnt`, 0), 0)) as `mobweb_app_tab_view_300s_events_cnt`,
-    toUInt64(if({is_web_client_sql}, ifNull(`atv`.`tab_view_600s_events_cnt`, 0), 0)) as `mobweb_app_tab_view_600s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_60s_user_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_60s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_120s_user_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_120s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_180s_user_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_180s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_300s_user_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_300s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_600s_user_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_600s_user_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_60s_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_60s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_120s_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_120s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_180s_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_180s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_300s_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_300s_events_cnt`,
+    toUInt64(round(if({is_web_client_sql}, ifNull(`atv`.`tab_view_600s_events_cnt`, 0) * {app_product_sample_multiplier_sql}, 0))) as `mobweb_app_tab_view_600s_events_cnt`,
     if({is_web_client_sql}, ifNull(`atv`.`tab_view_events_per_user_var`, 0), 0) as `mobweb_app_tab_view_events_per_user_var`,
     if({is_web_client_sql}, ifNull(`atv`.`tab_view_60s_events_per_user_var`, 0), 0) as `mobweb_app_tab_view_60s_events_per_user_var`,
     if({is_web_client_sql}, ifNull(`atv`.`tab_view_120s_events_per_user_var`, 0), 0) as `mobweb_app_tab_view_120s_events_per_user_var`,

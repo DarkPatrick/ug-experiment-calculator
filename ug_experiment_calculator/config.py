@@ -93,6 +93,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return float(raw)
+
+
 @dataclass(frozen=True)
 class ExperimentCalculatorConfig:
     database: str = "sandbox"
@@ -105,6 +112,7 @@ class ExperimentCalculatorConfig:
     funnels_yaml_path: Path = DEFAULT_FUNNELS_YAML_PATH
     default_clients: tuple[str, ...] = ("UGT_IOS", "UGT_ANDROID", "UG_WEB")
     update_subscription_sources: bool = False
+    mobweb_product_metrics_sample_rate: float = 0.2
 
     @classmethod
     def from_env(
@@ -136,6 +144,7 @@ class ExperimentCalculatorConfig:
             funnels_yaml_path=Path(funnels_yaml_path) if funnels_yaml_path else DEFAULT_FUNNELS_YAML_PATH,
             default_clients=default_clients,
             update_subscription_sources=_env_bool(f"{prefix}UPDATE_SUBSCRIPTION_SOURCES", False),
+            mobweb_product_metrics_sample_rate=_env_float(f"{prefix}MOBWEB_PRODUCT_METRICS_SAMPLE_RATE", 0.2),
         )
 
     def physical_table(self, logical_table_name: str) -> str:

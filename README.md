@@ -142,7 +142,9 @@ segments: {
 Для `UG_WEB` экспериментов пайплайн различает desktop web и mobweb по `clients_options` и сегменту:
 
 - `platform = [1]` считается обычным web и использует `exp_raw_data_web*.sql`.
-- Любые mobweb-платформы (`[2]`, `[2, 3]`, `[1, 2]`) используют `exp_raw_data_mobweb*.sql`.
+- Любые mobweb-платформы (`[2]`, `[2, 3]`) используют `exp_raw_data_mobweb*.sql`.
+- Mixed web-конфиг, где для `UG_WEB` одновременно есть `platform = 1` и любая platform `> 1`, разворачивается в два расчетных клиента: `UG_WEB DESKTOP`, затем `UG_WEB MOBWEB`. Это не segments/slices: exp users, метрики, статистики, forecast и итоговые report-блоки пишутся и отображаются как разные clients, аналогично отдельным app-клиентам.
+- В mixed web-расчете desktop-блок получает desktop/web product-метрики, mobweb-блок получает mobweb-specific product-метрики; `mobweb_app_*` не попадают в desktop, а `web_*` product-метрики не попадают в mobweb.
 - Если для `UG_WEB` нет platform-опции, расчет выбирает mobweb-шаблон, чтобы не потерять mobile web аудиторию.
 
 В `exp_users_{exp_id}` есть дополнительные поля для mobweb-сценария:
@@ -218,7 +220,7 @@ arpu, $:
 | `percentage` | Если `true`, `mean_0`, `mean_1`, `mean_diff`, `ci_low`, `ci_high` умножаются на `100`. |
 | `distribution` | Сейчас используется `bernoulli` для конверсионных метрик без variance-колонки. |
 | `variance` | Колонка дисперсии для revenue/count метрик. |
-| `sources` | Список источников/клиентов, для которых считать метрику: `UG_WEB`, `UG_IOS`, `UG_ANDROID`, `UGT_ANDROID`, `UGT_IOS`. |
+| `sources` | Список источников/клиентов, для которых считать метрику: `UG_WEB`, `UG_IOS`, `UG_ANDROID`, `UGT_ANDROID`, `UGT_IOS`. Для mixed web расчетные клиенты `UG_WEB DESKTOP` и `UG_WEB MOBWEB` матчятся как source `UG_WEB`. |
 | `platforms` | Web-platform bucket: `all`, `desktop` (`platform=1`), `mobile` (`platform>1`), `phone` (`platform=2`), `tablet` (`platform=3`). |
 | `domain` | Группа для генераторов таблиц и графиков: `monetization` или `product`. Если поле отсутствует, используется `monetization`. |
 | `description` | Человекочитаемое описание. |
@@ -246,7 +248,9 @@ Return-события:
 | --- | --- | --- |
 | Web | `Tab View`, `Home View` | `web retention 1d/7d/14d, %` |
 | App | `Tab Open`, `App Start`, `Courses Open`, `Shots Open`, `Tabs Open` | `app retention 1d/7d/14d, %` |
-| Mobweb | оба набора событий | web retention и отдельный `mobweb app retention 1d/7d/14d, %` |
+| Mobweb | app-события после mobweb -> app перехода | `mobweb app retention 1d/7d/14d, %` |
+
+Mobweb app product-метрики (`mobweb_app_retention_*`, `mobweb_app_tab_view_*`) считаются по deterministic sample исходных web users. По умолчанию берется 20% (`mobweb_product_metrics_sample_rate=0.2`, env: `EXPERIMENT_MOBWEB_PRODUCT_METRICS_SAMPLE_RATE`), counts масштабируются обратно на полный mobweb-трафик. Для CI/p-value используется effective sample size `denominator * sample_rate`, чтобы статистика не выглядела как полный 100% расчет. Эти метрики являются приближенными, но расчет не упирается в полный mobweb x app join.
 
 Внутри одного запуска retention не пересчитывается для сегментов с одинаковыми user-условиями: кэш-ключ строится по raw-user query type, `uwf`, `uhf`, rights-фильтрам и web-platform признакам. Сегменты, отличающиеся только subscription-фильтрами `swf/shf`, переиспользуют один retention-агрегат.
 

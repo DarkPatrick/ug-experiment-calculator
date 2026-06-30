@@ -20,6 +20,7 @@ from .metrics import (
     load_metrics_config,
     normalize_metric_config,
 )
+from .repository import base_client_for_calculation
 from .value_formatting import (
     apply_number_affixes,
     format_diff_percent,
@@ -134,6 +135,7 @@ def _get_latest_results_rows(
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
+    clients = _expand_summary_query_clients(exp_id, clients, config=config)
     filters = [f"`exp_id` = {int(exp_id)}"]
     filters.extend(_in_filter("client", clients, _clickhouse_string_literal))
     filters.extend(_in_filter("segment", segments, _clickhouse_string_literal))
@@ -183,6 +185,7 @@ def _get_latest_stats_rows(
     from clickhouse_worker import clickhouse_string_literal as _clickhouse_string_literal
     from clickhouse_worker import execute_sql
 
+    clients = _expand_summary_query_clients(exp_id, clients, config=config)
     filters = [f"`exp_id` = {int(exp_id)}"]
     filters.extend(_in_filter("client", clients, _clickhouse_string_literal))
     filters.extend(_in_filter("segment", segments, _clickhouse_string_literal))
@@ -424,7 +427,9 @@ def _filter_configured_rows(df: pd.DataFrame, configs: dict[str, _SummaryItemCon
         config = configs.get(str(row["metric"]))
         if config is None:
             continue
-        if config.sources and str(row["client"]) not in config.sources:
+        client = str(row["client"])
+        source_client = base_client_for_calculation(client)
+        if config.sources and client not in config.sources and source_client not in config.sources:
             continue
         rows.append(row)
 
@@ -448,6 +453,23 @@ def _filtered_config_names(configs: dict[str, _SummaryItemConfig], names: Option
         return config_names
     allowed_names = {str(name) for name in names}
     return [name for name in config_names if name in allowed_names]
+
+
+def _expand_summary_query_clients(
+    exp_id: int,
+    clients: Optional[Sequence[str]],
+    *,
+    config: ExperimentCalculatorConfig,
+) -> Optional[list[str]]:
+    if clients is None:
+        return None
+
+    from .repository import expand_experiment_clients, get_experiment
+
+    exp_info = get_experiment(exp_id, config=config)
+    if not exp_info.get("clients_list"):
+        exp_info["clients_list"] = list(config.default_clients)
+    return expand_experiment_clients(exp_info, list(clients))
 
 
 def _format_text(value: Any) -> str:

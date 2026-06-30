@@ -31,6 +31,11 @@ from .config import ExperimentCalculatorConfig
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 7
 
+UG_WEB_CLIENT = "UG_WEB"
+UG_WEB_DESKTOP_CLIENT = "UG_WEB DESKTOP"
+UG_WEB_MOBWEB_CLIENT = "UG_WEB MOBWEB"
+UG_WEB_CALCULATION_CLIENTS = {UG_WEB_DESKTOP_CLIENT, UG_WEB_MOBWEB_CLIENT}
+
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
     return config or ExperimentCalculatorConfig.from_env()
@@ -588,6 +593,73 @@ def _flatten_option_values(value: object) -> list[object]:
     return [value]
 
 
+def base_client_for_calculation(client: str) -> str:
+    return UG_WEB_CLIENT if str(client) in UG_WEB_CALCULATION_CLIENTS else str(client)
+
+
+def source_client_for_calculation(client: str) -> str:
+    return base_client_for_calculation(client)
+
+
+def _client_options_from_exp_info(exp_info: dict, client: str) -> object:
+    parsed_options = _parse_clients_options(exp_info.get("clients_options", ""))
+    if isinstance(parsed_options, dict):
+        return parsed_options.get(base_client_for_calculation(client), {})
+    return {}
+
+
+def _platform_bucket_flags(platform_values: list[object]) -> tuple[bool, bool]:
+    has_desktop = False
+    has_mobweb = False
+    for value in platform_values:
+        text = str(value).strip().lower()
+        if text in {"all"}:
+            has_desktop = True
+            has_mobweb = True
+            continue
+        if text in {"desktop", "web"}:
+            has_desktop = True
+            continue
+        if text in {"mobile", "mobweb", "mobile_web", "mobile web", "mweb", "phone", "tablet"}:
+            has_mobweb = True
+            continue
+        try:
+            platform_id = int(text)
+        except ValueError:
+            continue
+        if platform_id == 1:
+            has_desktop = True
+        elif platform_id > 1:
+            has_mobweb = True
+    return has_desktop, has_mobweb
+
+
+def is_mixed_web_experiment(exp_info: dict) -> bool:
+    if UG_WEB_CLIENT not in exp_info.get("clients_list", []):
+        return False
+    client_options = _client_options_from_exp_info(exp_info, UG_WEB_CLIENT)
+    has_desktop, has_mobweb = _platform_bucket_flags(_collect_platform_values(client_options))
+    return has_desktop and has_mobweb
+
+
+def expand_experiment_clients(exp_info: dict, clients: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    source_clients = list(clients if clients is not None else exp_info.get("clients_list") or [])
+    if not is_mixed_web_experiment(exp_info):
+        return source_clients
+
+    result = []
+    for client in source_clients:
+        client_text = str(client)
+        if client_text == UG_WEB_CLIENT:
+            candidates = [UG_WEB_DESKTOP_CLIENT, UG_WEB_MOBWEB_CLIENT]
+        else:
+            candidates = [client_text]
+        for candidate in candidates:
+            if candidate not in result:
+                result.append(candidate)
+    return result
+
+
 def _text_has_mobweb_marker(value: object) -> bool:
     text = str(value).lower()
     return (
@@ -622,9 +694,28 @@ def _platform_values_are_mobweb(platform_values: list[object]) -> bool:
 
 
 def is_mobweb_segment(segment: dict, clients_options: object = "", client: str = "UG_WEB") -> bool:
+    if str(client) == UG_WEB_MOBWEB_CLIENT:
+        return True
+    if str(client) == UG_WEB_DESKTOP_CLIENT:
+        return False
+
+    if "platform" in segment:
+        has_desktop, has_mobweb = _platform_bucket_flags(_flatten_option_values(segment.get("platform")))
+        if has_mobweb:
+            return True
+        if has_desktop:
+            return False
+
     platform = str(segment.get("platform", "")).lower()
     if platform in {"mobweb", "mobile_web", "mobile web", "mweb"}:
         return True
+    if platform in {"desktop", "web"}:
+        return False
+    try:
+        if int(platform) == 1:
+            return False
+    except ValueError:
+        pass
     if segment.get("mobweb") is True or segment.get("mobile_web") is True:
         return True
 
@@ -634,7 +725,7 @@ def is_mobweb_segment(segment: dict, clients_options: object = "", client: str =
 
     parsed_options = _parse_clients_options(clients_options)
     if isinstance(parsed_options, dict):
-        parsed_options = parsed_options.get(client, {})
+        parsed_options = parsed_options.get(base_client_for_calculation(client), {})
     if _text_has_mobweb_marker(parsed_options):
         return True
     return _platform_values_are_mobweb(_collect_platform_values(parsed_options))
@@ -642,11 +733,41 @@ def is_mobweb_segment(segment: dict, clients_options: object = "", client: str =
 
 def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: object = "", insert: bool = False) -> str:
     suffix = "_insert" if insert else ""
-    if client == "UG_WEB":
+    if base_client_for_calculation(client) == UG_WEB_CLIENT:
         if is_mobweb_segment(segment, clients_options, client):
             return f"exp_raw_data_mobweb{suffix}"
         return f"exp_raw_data_web{suffix}"
     return f"exp_raw_data_app{suffix}"
+
+
+def web_event_platform_filter_sql(client: str, segment: dict, clients_options: object = "") -> str:
+    if base_client_for_calculation(client) != UG_WEB_CLIENT:
+        return "1"
+    if is_mobweb_segment(segment, clients_options, client):
+        return "`platform` > 1"
+    return "`platform` = 1"
+
+
+def app_product_sample_params(
+    client: str,
+    segment: dict,
+    clients_options: object = "",
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> tuple[str, str]:
+    if base_client_for_calculation(client) == UG_WEB_CLIENT and is_mobweb_segment(segment, clients_options, client):
+        cfg = get_config(config)
+        sample_rate = float(cfg.mobweb_product_metrics_sample_rate)
+        if sample_rate <= 0:
+            raise ValueError("mobweb_product_metrics_sample_rate must be greater than 0")
+        if sample_rate >= 1:
+            return "1", "1"
+
+        bucket_count = 10000
+        threshold = max(1, min(bucket_count, round(sample_rate * bucket_count)))
+        multiplier = bucket_count / threshold
+        return f"cityHash64(toUInt64(`eut`.`unified_id`)) % {bucket_count} < {threshold}", f"{multiplier:.12g}"
+    return "1", "1"
 
 
 def get_segment_hash(segment: dict) -> str:
@@ -885,13 +1006,14 @@ def _insert_mobweb_experiment_users_day(
 ) -> None:
     cfg = get_config(config)
     exp_id = exp_info["id"]
+    source_client = source_client_for_calculation(client)
     common_params = {
         "exp_id": exp_id,
         "where_sql": where_filter,
         "having_sql": having_filter,
         "date_filter": current_day.strftime("%Y-%m-%d"),
         "exp_users_table": full_table_name,
-        "client": client,
+        "client": source_client,
         "client_sql": _clickhouse_string_literal(client),
         "segment_sql": _clickhouse_string_literal(segment_name),
         "segment_hash_sql": _clickhouse_string_literal(segment_hash),
@@ -1102,6 +1224,21 @@ def _delete_exp_users_segment(
     """
     logger.info("Deleting cached users from %s for client=%s, segment=%s", table_name, client, segment_name)
     execute_sql_modify(query)
+
+
+def delete_experiment_users_segment(
+    exp_id: int,
+    client: str,
+    segment_name: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    table_name = cfg.full_table(f"exp_users_{int(exp_id)}")
+    exists_df = execute_sql(f"exists {table_name}")
+    if int(exists_df.iloc[0].values[0]) == 0:
+        return
+    _delete_exp_users_segment(table_name, client, segment_name, config=cfg)
 
 
 def _ensure_exp_users_segment_hash(
@@ -1393,7 +1530,9 @@ def create_experiment_users_table(
     table_name = f"exp_users_{exp_id}"
     full_table_name = cfg.full_table(table_name)
     segment_hash = get_experiment_users_hash(exp_info, client, segment)
-    is_mobweb = client == "UG_WEB" and is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
+    source_client = source_client_for_calculation(client)
+    is_web_client = base_client_for_calculation(client) == UG_WEB_CLIENT
+    is_mobweb = is_web_client and is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
 
     where_filter = segment.get("uwf", "1")
     if exp_info["experiment_event_start"] == "App Experiment Start":
@@ -1429,7 +1568,7 @@ def create_experiment_users_table(
                 "where_sql": where_filter,
                 "having_sql": having_filter,
                 "date_filter": exp_start_dt.strftime("%Y-%m-%d"),
-                "client": client,
+                "client": source_client,
             },
             config=cfg,
         )
@@ -1485,7 +1624,7 @@ def create_experiment_users_table(
                 "having_sql": having_filter,
                 "date_filter": current_day.strftime("%Y-%m-%d"),
                 "exp_users_table": full_table_name,
-                "client": client,
+                "client": source_client,
                 "client_sql": _clickhouse_string_literal(client),
                 "segment_sql": _clickhouse_string_literal(segment_name),
                 "segment_hash_sql": _clickhouse_string_literal(segment_hash),
@@ -1748,9 +1887,19 @@ def get_retention_metrics(
     segment_hash: str = "",
     *,
     calculate_app_retention: bool = True,
+    segment: Optional[dict] = None,
+    clients_options: object = "",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
-    is_web_client = client == "UG_WEB"
+    is_web_client = base_client_for_calculation(client) == UG_WEB_CLIENT
+    calculate_web_retention = is_web_client and not is_mobweb_segment(segment or {}, clients_options, client)
+    web_event_platform_sql = web_event_platform_filter_sql(client, segment or {}, clients_options)
+    app_product_sample_sql, app_product_sample_multiplier_sql = app_product_sample_params(
+        client,
+        segment or {},
+        clients_options,
+        config=config,
+    )
     query = get_query(
         "retention_metrics",
         params={
@@ -1759,9 +1908,12 @@ def get_retention_metrics(
             "segment_sql": _clickhouse_string_literal(segment_name),
             "segment_hash_sql": _clickhouse_string_literal(segment_hash),
             "app_retention_unified_id_sql": "`app_unified_id`" if is_web_client else "`unified_id`",
-            "calculate_web_retention_sql": "1" if is_web_client else "0",
+            "calculate_web_retention_sql": "1" if calculate_web_retention else "0",
             "calculate_app_retention_sql": "1" if calculate_app_retention else "0",
             "is_web_client_sql": "1" if is_web_client else "0",
+            "web_event_platform_sql": web_event_platform_sql,
+            "app_product_sample_sql": app_product_sample_sql,
+            "app_product_sample_multiplier_sql": app_product_sample_multiplier_sql,
         },
         config=config,
     )
@@ -1777,9 +1929,19 @@ def get_tab_view_metrics(
     segment_hash: str = "",
     *,
     calculate_app_tab_view: bool = True,
+    segment: Optional[dict] = None,
+    clients_options: object = "",
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
-    is_web_client = client == "UG_WEB"
+    is_web_client = base_client_for_calculation(client) == UG_WEB_CLIENT
+    calculate_web_tab_view = is_web_client and not is_mobweb_segment(segment or {}, clients_options, client)
+    web_event_platform_sql = web_event_platform_filter_sql(client, segment or {}, clients_options)
+    app_product_sample_sql, app_product_sample_multiplier_sql = app_product_sample_params(
+        client,
+        segment or {},
+        clients_options,
+        config=config,
+    )
     query = get_query(
         "tab_view_metrics",
         params={
@@ -1789,9 +1951,12 @@ def get_tab_view_metrics(
             "segment_sql": _clickhouse_string_literal(segment_name),
             "segment_hash_sql": _clickhouse_string_literal(segment_hash),
             "app_tab_view_unified_id_sql": "`app_unified_id`" if is_web_client else "`unified_id`",
-            "calculate_web_tab_view_sql": "1" if is_web_client else "0",
+            "calculate_web_tab_view_sql": "1" if calculate_web_tab_view else "0",
             "calculate_app_tab_view_sql": "1" if calculate_app_tab_view else "0",
             "is_web_client_sql": "1" if is_web_client else "0",
+            "web_event_platform_sql": web_event_platform_sql,
+            "app_product_sample_sql": app_product_sample_sql,
+            "app_product_sample_multiplier_sql": app_product_sample_multiplier_sql,
         },
         config=config,
     )

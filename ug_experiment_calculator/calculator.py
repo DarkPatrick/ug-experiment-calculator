@@ -25,9 +25,12 @@ from .repository import (
     create_experiment_users_table,
     create_experiment_users_slice_segments,
     create_experiments_subscription_table,
+    delete_experiment_users_segment,
     drop_exp_partitions,
     drop_table,
     ensure_table_columns,
+    base_client_for_calculation,
+    expand_experiment_clients,
     get_experiment,
     get_experiment_users_hash,
     get_funnel_metrics,
@@ -36,6 +39,7 @@ from .repository import (
     get_tab_view_metrics,
     get_user_filters_hash,
     is_mobweb_segment,
+    UG_WEB_CLIENT,
     update_exp_results_table,
     update_subscription_source_tables,
 )
@@ -225,9 +229,11 @@ def _calculate_exp_segment_info(
             segment_name,
             segment_hash,
             calculate_app_retention=(
-                client != "UG_WEB"
+                base_client_for_calculation(client) != "UG_WEB"
                 or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
             ),
+            segment=segment,
+            clients_options=exp_info.get("clients_options", ""),
             config=cfg,
         )
     elif include_product_metrics:
@@ -258,9 +264,11 @@ def _calculate_exp_segment_info(
             segment_name,
             segment_hash,
             calculate_app_tab_view=(
-                client != "UG_WEB"
+                base_client_for_calculation(client) != "UG_WEB"
                 or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
             ),
+            segment=segment,
+            clients_options=exp_info.get("clients_options", ""),
             config=cfg,
         )
     elif include_product_metrics:
@@ -363,6 +371,7 @@ def _calculate_exp_segment_info(
         client=client,
         segment=segment,
         clients_options=exp_info.get("clients_options", ""),
+        mobweb_product_metrics_sample_rate=cfg.mobweb_product_metrics_sample_rate,
         domain=None if include_product_metrics else "monetization",
     )
 
@@ -403,6 +412,29 @@ def _calculate_exp_segment_info(
     return subscription_table
 
 
+def _drop_obsolete_web_client_outputs(
+    exp_id: int,
+    segment_names,
+    *,
+    config: ExperimentCalculatorConfig,
+) -> None:
+    for segment_name in segment_names:
+        delete_experiment_users_segment(exp_id, UG_WEB_CLIENT, segment_name, config=config)
+        for table_name in (
+            "ug_exp_results",
+            "ug_exp_stats",
+            "ug_exp_funnel_results",
+            "ug_exp_funnel_stats",
+        ):
+            drop_exp_partitions(
+                exp_id,
+                client_name=UG_WEB_CLIENT,
+                segment=segment_name,
+                table_name=table_name,
+                config=config,
+            )
+
+
 def calculate_exp_info(
     exp_id,
     *,
@@ -415,8 +447,14 @@ def calculate_exp_info(
 
     if not exp_info.get("clients_list"):
         exp_info["clients_list"] = list(cfg.default_clients)
+    source_clients = list(exp_info["clients_list"])
+    expanded_clients = expand_experiment_clients(exp_info)
+    exp_info["clients_list"] = expanded_clients
     if exp_info.get("experiment_event_start") in [None, "", "xxx"]:
         raise ValueError(f"Experiment {exp_id} has invalid experiment_event_start: {exp_info.get('experiment_event_start')}")
+
+    if UG_WEB_CLIENT in source_clients and UG_WEB_CLIENT not in expanded_clients:
+        _drop_obsolete_web_client_outputs(exp_id, exp_info.get("segments", {}).keys(), config=cfg)
 
     if cfg.update_subscription_sources:
         logger.info("Updating subscription source tables")
