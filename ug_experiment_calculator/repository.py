@@ -808,7 +808,6 @@ def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) ->
         "client": client,
         "clients_options": clients_options,
         "date_start": exp_info.get("date_start", 0),
-        "date_end": exp_info.get("date_end", 0),
         "experiment_event_start": exp_info.get("experiment_event_start", ""),
     }
 
