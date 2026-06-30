@@ -122,7 +122,7 @@ calculate_exp_info(123456, config=config)
 | `exp_users_{exp_id}` | Пользователи эксперимента с `client`, `segment`, `segment_hash`. |
 | `exp_subscription_{exp_id}_{session_id}` | Временная таблица подписок для одного запуска расчета. |
 
-`exp_users_{exp_id}` переиспользуется между запусками. Если хэш сегмента изменился, строки этого сегмента удаляются и собираются заново.
+`exp_users_{exp_id}` переиспользуется между запусками. `segment_hash` считается по фильтрам сегмента и контексту набора пользователей: `client`, `clients_options`, `experiment_event_start`, `date_start`, `date_end`. Если этот хэш изменился, строки сегмента удаляются и собираются заново.
 
 ### Slice-сегменты
 

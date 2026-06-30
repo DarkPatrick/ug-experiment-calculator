@@ -770,9 +770,16 @@ def app_product_sample_params(
     return "1", "1"
 
 
-def get_segment_hash(segment: dict) -> str:
-    segment_json = json.dumps(segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
+def _stable_config_hash(config: object) -> str:
+    config_json = json.dumps(config, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+
+
+def get_segment_hash(segment: dict, *, exp_info: Optional[dict] = None, client: str = "") -> str:
+    if exp_info is None:
+        return _stable_config_hash(segment)
+
+    return _stable_config_hash(_experiment_users_hash_config(exp_info, client, segment))
 
 
 def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: object = "") -> str:
@@ -794,9 +801,9 @@ def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: o
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
 
 
-def get_experiment_users_hash(exp_info: dict, client: str, segment: dict) -> str:
+def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) -> dict:
     clients_options = exp_info.get("clients_options", "")
-    users_cache_config = {
+    return {
         "user_filters_hash": get_user_filters_hash(segment, client=client, clients_options=clients_options),
         "client": client,
         "clients_options": clients_options,
@@ -804,8 +811,10 @@ def get_experiment_users_hash(exp_info: dict, client: str, segment: dict) -> str
         "date_end": exp_info.get("date_end", 0),
         "experiment_event_start": exp_info.get("experiment_event_start", ""),
     }
-    users_cache_json = json.dumps(users_cache_config, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(users_cache_json.encode("utf-8")).hexdigest()
+
+
+def get_experiment_users_hash(exp_info: dict, client: str, segment: dict) -> str:
+    return get_segment_hash(segment, exp_info=exp_info, client=client)
 
 
 def get_segment_slice_field(segment: dict) -> str:
