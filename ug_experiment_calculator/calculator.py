@@ -30,8 +30,12 @@ from .repository import (
     drop_table,
     ensure_table_columns,
     base_client_for_calculation,
+    experiment_base_id,
+    experiment_launch_id,
+    experiment_output_exp_id,
     expand_experiment_clients,
     get_experiment,
+    get_experiment_launches,
     get_experiment_users_hash,
     get_funnel_metrics,
     get_monetization_metrics,
@@ -53,6 +57,11 @@ FUNNEL_DEFINITION_COLUMNS = {
     "funnel_definition_key": "String",
     "funnel_definition_name": "String",
     "funnel_definition_description": "String",
+}
+
+EXPERIMENT_LAUNCH_COLUMNS = {
+    "base_exp_id": "Int64",
+    "exp_launch_id": "String",
 }
 
 
@@ -167,8 +176,7 @@ def _replace_exp_output_table(
         create_table_func(df, config=config)
         return
 
-    if required_columns:
-        ensure_table_columns(logical_table_name, required_columns, config=config)
+    ensure_table_columns(logical_table_name, {**EXPERIMENT_LAUNCH_COLUMNS, **(required_columns or {})}, config=config)
 
     drop_exp_partitions(exp_id, client_name=client, segment=segment_name, table_name=logical_table_name, config=config)
     if df.empty:
@@ -195,7 +203,9 @@ def _calculate_exp_segment_info(
     product_metrics_segments: dict,
     config: ExperimentCalculatorConfig,
 ) -> str:
-    exp_id = exp_info["id"]
+    base_exp_id = experiment_base_id(exp_info)
+    exp_id = experiment_output_exp_id(exp_info)
+    exp_launch_id = experiment_launch_id(exp_info)
     cfg = config
 
     logger.info("Loading subscriptions")
@@ -289,7 +299,8 @@ def _calculate_exp_segment_info(
 
     if include_product_metrics:
         df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
-    df_tot[(client, segment_name)] = df
+    frame_key = (exp_launch_id, client, segment_name)
+    df_tot[frame_key] = df
 
     logger.info("Loading subscription funnels")
     funnel_parts = []
@@ -328,9 +339,13 @@ def _calculate_exp_segment_info(
     )
 
     funnel_cum_df["exp_id"] = exp_id
+    funnel_cum_df["base_exp_id"] = base_exp_id
+    funnel_cum_df["exp_launch_id"] = exp_launch_id
     funnel_cum_df["client"] = client
     funnel_cum_df["segment"] = segment_name
     funnel_stats_df["exp_id"] = exp_id
+    funnel_stats_df["base_exp_id"] = base_exp_id
+    funnel_stats_df["exp_launch_id"] = exp_launch_id
     funnel_stats_df["client"] = client
     funnel_stats_df["segment"] = segment_name
 
@@ -386,19 +401,24 @@ def _calculate_exp_segment_info(
     df_cum_agg = df_cum_agg[["dt", "variation", *stats_metric_columns]]
     df_cum_agg = df_cum_agg.melt(id_vars=["dt", "variation"], var_name="metric", value_name="value")
     df_cum_agg["exp_id"] = exp_id
+    df_cum_agg["base_exp_id"] = base_exp_id
+    df_cum_agg["exp_launch_id"] = exp_launch_id
     df_cum_agg["client"] = client
     df_cum_agg["segment"] = segment_name
-    df_cum_agg_tot[(client, segment_name)] = df_cum_agg
+    df_cum_agg_tot[frame_key] = df_cum_agg
 
     stats_df["exp_id"] = exp_id
+    stats_df["base_exp_id"] = base_exp_id
+    stats_df["exp_launch_id"] = exp_launch_id
     stats_df["client"] = client
     stats_df["segment"] = segment_name
-    stats_df_tot[(client, segment_name)] = stats_df
+    stats_df_tot[frame_key] = stats_df
 
     is_results_exists = execute_sql(f"exists {cfg.exp_results_table}")
     if int(is_results_exists.iloc[0].values[0]) == 0:
         create_exp_results_table(stats_df, config=cfg)
     else:
+        ensure_table_columns("ug_exp_results", EXPERIMENT_LAUNCH_COLUMNS, config=cfg)
         drop_exp_partitions(exp_id, client_name=client, segment=segment_name, table_name="ug_exp_results", config=cfg)
         update_exp_results_table(stats_df, table="ug_exp_results", config=cfg)
 
@@ -406,6 +426,7 @@ def _calculate_exp_segment_info(
     if int(is_stats_exists.iloc[0].values[0]) == 0:
         create_exp_stats_table(df_cum_agg, config=cfg)
     else:
+        ensure_table_columns("ug_exp_stats", EXPERIMENT_LAUNCH_COLUMNS, config=cfg)
         drop_exp_partitions(exp_id, client_name=client, segment=segment_name, table_name="ug_exp_stats", config=cfg)
         update_exp_results_table(df_cum_agg, table="ug_exp_stats", config=cfg)
 
@@ -442,19 +463,18 @@ def calculate_exp_info(
     update_rollout: bool = True,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, pd.DataFrame], dict[str, pd.DataFrame], str]:
     cfg = config or ExperimentCalculatorConfig.from_env()
-    exp_info = get_experiment(exp_id, config=cfg)
+    base_exp_info = get_experiment(exp_id, config=cfg)
     funnels_config = load_funnels_config(cfg.funnels_yaml_path)
 
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(cfg.default_clients)
-    source_clients = list(exp_info["clients_list"])
-    expanded_clients = expand_experiment_clients(exp_info)
-    exp_info["clients_list"] = expanded_clients
-    if exp_info.get("experiment_event_start") in [None, "", "xxx"]:
-        raise ValueError(f"Experiment {exp_id} has invalid experiment_event_start: {exp_info.get('experiment_event_start')}")
-
-    if UG_WEB_CLIENT in source_clients and UG_WEB_CLIENT not in expanded_clients:
-        _drop_obsolete_web_client_outputs(exp_id, exp_info.get("segments", {}).keys(), config=cfg)
+    if not base_exp_info.get("clients_list"):
+        base_exp_info["clients_list"] = list(cfg.default_clients)
+    source_clients = list(base_exp_info["clients_list"])
+    expanded_clients = expand_experiment_clients(base_exp_info)
+    base_exp_info["clients_list"] = expanded_clients
+    if base_exp_info.get("experiment_event_start") in [None, "", "xxx"]:
+        raise ValueError(
+            f"Experiment {exp_id} has invalid experiment_event_start: {base_exp_info.get('experiment_event_start')}"
+        )
 
     if cfg.update_subscription_sources:
         logger.info("Updating subscription source tables")
@@ -463,60 +483,89 @@ def calculate_exp_info(
     df_tot = {}
     stats_df_tot = {}
     df_cum_agg_tot = {}
-    retention_cache = {}
-    tab_view_cache = {}
-    product_metrics_segments = {}
     exp_users_table = ""
     subscription_table = ""
 
-    for client in exp_info["clients_list"]:
-        for segment_name, segment in exp_info["segments"].items():
-            segment_hash = get_experiment_users_hash(exp_info, client, segment)
-            logger.info("Calculating experiment info for exp_id=%s, client=%s, segment=%s", exp_id, client, segment_name)
-            logger.info("Experiment info:\n%s", exp_info)
+    launch_infos = get_experiment_launches(base_exp_info, config=cfg)
+    logger.info(
+        "Experiment %s launch windows: %s",
+        exp_id,
+        [
+            {
+                "exp_launch_id": experiment_launch_id(launch_info),
+                "date_start": launch_info["date_start"],
+                "date_end": launch_info["date_end"],
+                "output_exp_id": experiment_output_exp_id(launch_info),
+            }
+            for launch_info in launch_infos
+        ],
+    )
 
-            logger.info("Loading users")
-            exp_users_table = create_experiment_users_table(exp_info, client, segment_name, segment, config=cfg)
-            segment_items = [(segment_name, segment, segment_hash)]
-            segment_items.extend(
-                create_experiment_users_slice_segments(
-                    exp_info,
-                    exp_users_table,
+    for exp_info in launch_infos:
+        launch_id = experiment_launch_id(exp_info)
+        output_exp_id = experiment_output_exp_id(exp_info)
+        if UG_WEB_CLIENT in source_clients and UG_WEB_CLIENT not in expanded_clients:
+            _drop_obsolete_web_client_outputs(output_exp_id, exp_info.get("segments", {}).keys(), config=cfg)
+
+        retention_cache = {}
+        tab_view_cache = {}
+        product_metrics_segments = {}
+
+        for client in exp_info["clients_list"]:
+            for segment_name, segment in exp_info["segments"].items():
+                segment_hash = get_experiment_users_hash(exp_info, client, segment)
+                logger.info(
+                    "Calculating experiment info for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
+                    output_exp_id,
+                    launch_id,
                     client,
                     segment_name,
-                    segment,
-                    segment_hash,
-                    config=cfg,
                 )
-            )
+                logger.info("Experiment info:\n%s", exp_info)
 
-            for current_segment_name, current_segment, current_segment_hash in segment_items:
-                logger.info(
-                    "Calculating segment metrics for exp_id=%s, client=%s, segment=%s",
-                    exp_id,
-                    client,
-                    current_segment_name,
-                )
-                subscription_table = _calculate_exp_segment_info(
-                    exp_info=exp_info,
-                    funnels_config=funnels_config,
-                    exp_users_table=exp_users_table,
-                    client=client,
-                    segment_name=current_segment_name,
-                    segment=current_segment,
-                    segment_hash=current_segment_hash,
-                    df_tot=df_tot,
-                    df_cum_agg_tot=df_cum_agg_tot,
-                    stats_df_tot=stats_df_tot,
-                    retention_cache=retention_cache,
-                    tab_view_cache=tab_view_cache,
-                    product_metrics_segments=product_metrics_segments,
-                    config=cfg,
+                logger.info("Loading users")
+                exp_users_table = create_experiment_users_table(exp_info, client, segment_name, segment, config=cfg)
+                segment_items = [(segment_name, segment, segment_hash)]
+                segment_items.extend(
+                    create_experiment_users_slice_segments(
+                        exp_info,
+                        exp_users_table,
+                        client,
+                        segment_name,
+                        segment,
+                        segment_hash,
+                        config=cfg,
+                    )
                 )
 
-    if update_rollout:
-        logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
-        update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
-        logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
+                for current_segment_name, current_segment, current_segment_hash in segment_items:
+                    logger.info(
+                        "Calculating segment metrics for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
+                        output_exp_id,
+                        launch_id,
+                        client,
+                        current_segment_name,
+                    )
+                    subscription_table = _calculate_exp_segment_info(
+                        exp_info=exp_info,
+                        funnels_config=funnels_config,
+                        exp_users_table=exp_users_table,
+                        client=client,
+                        segment_name=current_segment_name,
+                        segment=current_segment,
+                        segment_hash=current_segment_hash,
+                        df_tot=df_tot,
+                        df_cum_agg_tot=df_cum_agg_tot,
+                        stats_df_tot=stats_df_tot,
+                        retention_cache=retention_cache,
+                        tab_view_cache=tab_view_cache,
+                        product_metrics_segments=product_metrics_segments,
+                        config=cfg,
+                    )
+
+        if update_rollout and exp_info.get("is_latest_launch", True):
+            logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
+            update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
+            logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"

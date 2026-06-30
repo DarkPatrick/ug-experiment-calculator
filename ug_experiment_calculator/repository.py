@@ -96,6 +96,22 @@ def create_transient_table_sql(
     )
 
 
+def experiment_base_id(exp_info: dict) -> int:
+    return int(exp_info.get("base_id", exp_info["id"]))
+
+
+def experiment_storage_id(exp_info: dict) -> str:
+    return _identifier_part(exp_info.get("storage_id", exp_info.get("exp_launch_id", exp_info["id"])))
+
+
+def experiment_launch_id(exp_info: dict) -> str:
+    return str(exp_info.get("exp_launch_id", experiment_storage_id(exp_info)))
+
+
+def experiment_output_exp_id(exp_info: dict) -> int:
+    return int(exp_info.get("output_exp_id", experiment_base_id(exp_info)))
+
+
 def drop_exp_partitions(
     exp_id: int,
     client_name: str,
@@ -183,12 +199,14 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "client",
         "segment",
         "segment_hash",
+        "exp_launch_id",
     ]
 
     int_columns = [
         "control_variation",
         "test_variation",
         "exp_id",
+        "base_exp_id",
         "variation",
         "from_step_order",
         "to_step_order",
@@ -529,6 +547,89 @@ def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -
 
     logger.info("exp_info: %s", exp_info)
     return exp_info
+
+
+def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
+    base_id = experiment_base_id(exp_info)
+    query = f"""
+        select
+            `event_id`,
+            `date_created`
+        from `mysql_u_guitarcom`.`ab_experiment_history`
+        where
+            `experiment_id` = {base_id}
+        and
+            `event_id` in (5, 6)
+        order by
+            `date_created`,
+            `id`
+    """
+    df = execute_sql(query)
+    if df.empty:
+        return [_with_experiment_launch_context(exp_info, exp_info["date_start"], exp_info.get("date_end", 0), 1, True)]
+
+    intervals = []
+    current_start = None
+    for row in df.itertuples(index=False):
+        event_id = int(row.event_id)
+        date_created = int(row.date_created)
+        if event_id == 5:
+            if current_start is not None and date_created > current_start:
+                intervals.append((current_start, date_created - 1))
+            current_start = date_created
+            continue
+
+        if event_id == 6 and current_start is not None:
+            intervals.append((current_start, date_created))
+            current_start = None
+
+    if current_start is not None:
+        date_end = int(exp_info.get("date_end", 0) or 0)
+        intervals.append((current_start, date_end if date_end > current_start else 0))
+
+    if not intervals:
+        return [_with_experiment_launch_context(exp_info, exp_info["date_start"], exp_info.get("date_end", 0), 1, True)]
+
+    intervals = sorted(intervals, key=lambda item: item[0])
+    launches = []
+    for launch_number, (date_start, date_end) in enumerate(intervals, start=1):
+        launches.append(
+            _with_experiment_launch_context(
+                exp_info,
+                date_start,
+                date_end,
+                launch_number,
+                launch_number == len(intervals),
+            )
+        )
+    return launches
+
+
+def _with_experiment_launch_context(
+    exp_info: dict,
+    date_start: int,
+    date_end: int,
+    launch_number: int,
+    is_latest_launch: bool,
+) -> dict:
+    base_id = experiment_base_id(exp_info)
+    launch_id = str(base_id) if is_latest_launch else f"{base_id}_launch_{launch_number}"
+    output_exp_id = base_id if is_latest_launch else -(base_id * 1000 + launch_number)
+    launch_info = dict(exp_info)
+    launch_info.update(
+        {
+            "id": base_id,
+            "base_id": base_id,
+            "date_start": int(date_start),
+            "date_end": int(date_end or 0),
+            "storage_id": launch_id,
+            "exp_launch_id": launch_id,
+            "launch_number": launch_number,
+            "is_latest_launch": is_latest_launch,
+            "output_exp_id": output_exp_id,
+        }
+    )
+    return launch_info
 
 
 def generate_sql_rights_filter(rights_type: str, rights: str) -> str:
@@ -953,9 +1054,9 @@ def _identifier_part(value: object) -> str:
     return text or "empty"
 
 
-def _mobweb_stage_table_name(exp_id: int, client: str, segment_hash: str, current_day: datetime.datetime, stage: str) -> str:
+def _mobweb_stage_table_name(storage_id: str, client: str, segment_hash: str, current_day: datetime.datetime, stage: str) -> str:
     return (
-        f"exp_users_{exp_id}_mobweb_"
+        f"exp_users_{storage_id}_mobweb_"
         f"{_identifier_part(stage)}_"
         f"{_identifier_part(client)}_"
         f"{segment_hash[:12]}_"
@@ -1013,7 +1114,8 @@ def _insert_mobweb_experiment_users_day(
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> None:
     cfg = get_config(config)
-    exp_id = exp_info["id"]
+    exp_id = experiment_base_id(exp_info)
+    storage_id = experiment_storage_id(exp_info)
     source_client = source_client_for_calculation(client)
     common_params = {
         "exp_id": exp_id,
@@ -1028,7 +1130,7 @@ def _insert_mobweb_experiment_users_day(
     }
 
     web_users_table = _recreate_mobweb_stage_table(
-        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "web_users"),
+        _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "web_users"),
         "exp_raw_data_mobweb_web_users",
         common_params,
         schema=MOBWEB_WEB_USERS_SCHEMA,
@@ -1038,7 +1140,7 @@ def _insert_mobweb_experiment_users_day(
     )
     web_installs_params = common_params | {"web_users_table": web_users_table}
     web_installs_table = _recreate_mobweb_stage_table(
-        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "web_installs"),
+        _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "web_installs"),
         "exp_raw_data_mobweb_web_installs",
         web_installs_params,
         schema=MOBWEB_WEB_INSTALLS_SCHEMA,
@@ -1047,7 +1149,7 @@ def _insert_mobweb_experiment_users_day(
         config=cfg,
     )
     app_users_table = _create_mobweb_stage_table(
-        _mobweb_stage_table_name(exp_id, client, segment_hash, current_day, "app_users"),
+        _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "app_users"),
         schema=MOBWEB_APP_USERS_SCHEMA,
         partition="toYYYYMM(toDate(app_start_dt))",
         sorting="unified_id, variation",
@@ -1533,9 +1635,9 @@ def create_experiment_users_table(
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     cfg = get_config(config)
-    exp_id = exp_info["id"]
+    exp_id = experiment_base_id(exp_info)
     exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
-    table_name = f"exp_users_{exp_id}"
+    table_name = f"exp_users_{experiment_storage_id(exp_info)}"
     full_table_name = cfg.full_table(table_name)
     segment_hash = get_experiment_users_hash(exp_info, client, segment)
     source_client = source_client_for_calculation(client)
@@ -1820,7 +1922,7 @@ def create_experiments_subscription_table(
 ) -> str:
     cfg = get_config(config)
     session_id = generate_random_id(32)
-    table_name = f"exp_subscription_{exp_info['id']}_{session_id}"
+    table_name = f"exp_subscription_{experiment_storage_id(exp_info)}_{session_id}"
     query_part_1 = create_transient_table_sql(
         table_name,
         schema="",
@@ -2064,10 +2166,11 @@ def ensure_table_columns(
         if _table_has_column(full_table_name, column_name):
             continue
 
+        default_value = "''" if "String" in column_type else "0"
         query = f"""
             alter table {full_table_name}
             on cluster {cfg.cluster}
-            add column if not exists `{column_name}` {column_type} default ''
+            add column if not exists `{column_name}` {column_type} default {default_value}
         """
         execute_sql_modify(query)
 
