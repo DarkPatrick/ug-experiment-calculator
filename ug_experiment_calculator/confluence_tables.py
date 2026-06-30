@@ -77,6 +77,14 @@ DESIGN_TABLE_COLUMNS: tuple[str, ...] = (
     "Duration (days)",
 )
 
+DESIGN_METRIC_TYPE_COLUMN_ALIASES: tuple[str, ...] = (
+    "Metric type",
+    "Metric Type",
+    "metric_type",
+    "Type",
+    "type",
+)
+DESIGN_DEFAULT_METRIC_TYPE = "Goal"
 DESIGN_SUMMARY_ROW = "Design summary"
 DESIGN_SAMPLE_ROW = "Sample"
 DESIGN_DAYS_ROW = "Days"
@@ -818,7 +826,7 @@ def build_design_confluence_table_code(
     if not blocks:
         return _table([])
 
-    table_height = len(DESIGN_TABLE_COLUMNS) + 4
+    table_height = len(DESIGN_TABLE_COLUMNS) + 5
     rows = []
     for row_index in range(table_height):
         cells = []
@@ -1770,6 +1778,7 @@ def _prepare_design_platform_block(
     prepared_df = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame(df)
     source_columns = _design_source_columns(prepared_df)
     values_by_row = _design_values_by_row(prepared_df, source_columns, thousands_separator=thousands_separator)
+    metric_type_values = _design_metric_type_values(prepared_df)
     value_count = max(len(prepared_df.index), 1)
 
     rows = []
@@ -1783,16 +1792,35 @@ def _prepare_design_platform_block(
         )
     ])
 
-    for row_index, row_name in enumerate(DESIGN_TABLE_COLUMNS):
+    rows.append(
+        _design_metric_row(
+            DESIGN_TABLE_COLUMNS[0],
+            metric_type_values,
+            value_count,
+            include_row_name=include_row_names,
+            is_type_row=True,
+        )
+    )
+    rows.append(
+        _design_metric_row(
+            DESIGN_TABLE_COLUMNS[0],
+            values_by_row[DESIGN_TABLE_COLUMNS[0]],
+            value_count,
+            include_row_name=include_row_names,
+            is_type_row=False,
+        )
+    )
+
+    for row_name in DESIGN_TABLE_COLUMNS[1:]:
         cells = [_row_header_cell(row_name)] if include_row_names else []
         cells.extend(
             _design_value_cell(
                 value,
                 row_name,
-                background=HEADER_COLOR if row_index == 0 else None,
-                bold=row_index == 0,
-                italic=row_index != 0,
-                align="left" if row_index == 0 else "right",
+                background=None,
+                bold=False,
+                italic=True,
+                align="right",
             )
             for value in _pad_design_values(values_by_row[row_name], value_count)
         )
@@ -1822,10 +1850,63 @@ def _prepare_design_platform_block(
     return rows
 
 
+def _design_metric_row(
+    row_name: str,
+    values: list[str],
+    value_count: int,
+    *,
+    include_row_name: bool,
+    is_type_row: bool,
+) -> list[str]:
+    cells = []
+    if include_row_name and is_type_row:
+        cells.append(_cell(row_name, background=HEADER_COLOR, bold=True, rowspan=2, align="left"))
+    cells.extend(
+        _design_value_cell(
+            value,
+            row_name,
+            background=HEADER_COLOR,
+            bold=True,
+            italic=False,
+            align="left",
+        )
+        for value in _pad_design_values(values, value_count)
+    )
+    return cells
+
+
 def _design_source_columns(df: pd.DataFrame) -> list[Any]:
     if all(column in df.columns for column in DESIGN_TABLE_COLUMNS):
         return list(DESIGN_TABLE_COLUMNS)
-    return list(df.columns[:len(DESIGN_TABLE_COLUMNS)])
+
+    columns = []
+    metric_type_column = _design_metric_type_column(df)
+    for column in df.columns:
+        if column == metric_type_column:
+            continue
+        columns.append(column)
+        if len(columns) == len(DESIGN_TABLE_COLUMNS):
+            break
+    return columns
+
+
+def _design_metric_type_column(df: pd.DataFrame) -> Any | None:
+    for column_name in DESIGN_METRIC_TYPE_COLUMN_ALIASES:
+        if column_name in df.columns:
+            return column_name
+    return None
+
+
+def _design_metric_type_values(df: pd.DataFrame) -> list[str]:
+    metric_type_column = _design_metric_type_column(df)
+    if metric_type_column is None:
+        return [DESIGN_DEFAULT_METRIC_TYPE] * len(df.index)
+
+    values = []
+    for value in df[metric_type_column].tolist():
+        formatted_value = _format_text(value)
+        values.append(formatted_value or DESIGN_DEFAULT_METRIC_TYPE)
+    return values
 
 
 def _design_values_by_row(
