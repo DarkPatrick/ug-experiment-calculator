@@ -2031,6 +2031,7 @@ def create_experiments_subscription_table(
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
     cfg = get_config(config)
+    _ensure_subscription_source_tables(config=cfg)
     session_id = generate_random_id(32)
     table_name = f"exp_subscription_{experiment_storage_id(exp_info)}_{session_id}"
     query_part_1 = create_transient_table_sql(
