@@ -768,10 +768,12 @@ from ug_experiment_calculator import (
     drop_table,
     drop_exp_partitions,
     update_subscription_source_tables,
+    update_trial_conversion_model,
 )
 ```
 
 - `update_subscription_source_tables()` - обновить кэши подписок.
+- `update_trial_conversion_model()` - обновить дневную таблицу `trial_conversion_model` с expected trial-to-charge conversion по `(platform, tier, base_price_int)`; при `EXPERIMENT_CH_TABLE_PREFIX` физическое имя получает тот же префикс.
 - `drop_exp_partitions(...)` - удалить партиции конкретного `exp_id/client/segment` из результирующей таблицы.
 - `clear_exp_temp_tables()` - удалить временные таблицы, найденные SQL-шаблоном `get_sloperator_temp_tables.sql`.
 - `drop_table(table_name)` - удалить таблицу на кластере.

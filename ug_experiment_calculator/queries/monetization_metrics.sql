@@ -76,6 +76,69 @@ with
         union distinct
         select * from `payment_account_matches`
     ),
+    `latest_trial_conversion_model` as (
+        select
+            `platform`,
+            `tier`,
+            `base_price_int`,
+            `conversion`
+        from
+            {trial_conversion_model_table}
+        where
+            `update_dt` = (
+                select max(`update_dt`)
+                from {trial_conversion_model_table}
+            )
+    ),
+    `subscription_matches_with_expected` as (
+        select
+            `sta`.*,
+            toInt32(ifNull(`cr`.`tier`, 0)) as `tier`,
+            toInt32(round(ifNull(`sta`.`base_price`, 0))) as `base_price_int`,
+            toUInt8(
+                (
+                    `sta`.`has_pro_instant_offer` > 0
+                    and lower(`sta`.`service_name`) like '%pro%'
+                    and length(arrayFilter(x -> x between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 86400, `sta`.`pro_instant_offer_sub_dts`)) > 0
+                )
+                or (
+                    `sta`.`has_book_instant_offer` > 0
+                    and lower(`sta`.`service_name`) like '%book%'
+                    and length(arrayFilter(x -> x between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 86400, `sta`.`book_instant_offer_sub_dts`)) > 0
+                )
+            ) as `is_trial2instant`,
+            coalesce(`tcm`.`conversion`, `toc`.`conversion`, 0) as `expected_trial_conversion`,
+            ifNotFinite(
+                ifNull(`sta`.`base_price`, 0) * case
+                    when lower(`sta`.`platform`) like '%ios%' then 0.7
+                    when lower(`sta`.`platform`) like '%and%' then 0.85
+                    else 1
+                end,
+                0
+            ) as `expected_trial_net_price`
+        from
+            `subscription_matches` as `sta`
+        left join
+            `default`.`country_regions` as `cr`
+        on
+            `sta`.`country` = `cr`.`country_code_a2`
+        left join
+            `latest_trial_conversion_model` as `tcm`
+        on
+            `sta`.`platform` = `tcm`.`platform`
+        and
+            toInt32(ifNull(`cr`.`tier`, 0)) = `tcm`.`tier`
+        and
+            toInt32(round(ifNull(`sta`.`base_price`, 0))) = `tcm`.`base_price_int`
+        left join
+            `latest_trial_conversion_model` as `toc`
+        on
+            `sta`.`platform` = `toc`.`platform`
+        and
+            toInt32(ifNull(`cr`.`tier`, 0)) = `toc`.`tier`
+        and
+            `toc`.`base_price_int` = -1
+    ),
     `subscriptions_per_user` as (
         select
             `dt`,
@@ -94,7 +157,7 @@ with
             from
                 `exp_users` as `eut`
             left join
-                `subscription_matches` as `sta`
+                `subscription_matches_with_expected` as `sta`
             on
                 `eut`.`unified_id` = `sta`.`exp_unified_id`
             group by
@@ -124,7 +187,7 @@ with
             from
                 `exp_users` as `eut`
             left join
-                `subscription_matches` as `sta`
+                `subscription_matches_with_expected` as `sta`
             on
                 `eut`.`unified_id` = `sta`.`exp_unified_id`
             group by
@@ -160,7 +223,7 @@ with
             from
                 `exp_users` as `eut`
             left join
-                `subscription_matches` as `sta`
+                `subscription_matches_with_expected` as `sta`
             on
                 `eut`.`unified_id` = `sta`.`exp_unified_id`
             group by
@@ -196,6 +259,8 @@ select
     `subscriptions_cnt` + `access_otp_cnt` as `access_cnt`,
 
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `charged_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `expected_trial_cnt`,
+    coalesce(sumIf(`sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_charged_trial_cnt`,
     uniqIf(
         (`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)),
         `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`))
@@ -218,6 +283,9 @@ select
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`charge_dt` > toUnixTimestamp(now()) - 1209600) as `pending_14d_charge_cnt`,
     coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400), 0)
         - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600), 0) as `revenue`,
+    coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
+        - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
+        + coalesce(sumIf(`sta`.`expected_trial_net_price` * `sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_revenue`,
     coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600), 0) as `refund_revenue`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`charge_dt` >= `sta`.`subscribed_dt`) as `recurrent_charge_cnt`,
     coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`charge_dt` >= `sta`.`subscribed_dt`), 0) as `recurrent_revenue`,
@@ -235,7 +303,7 @@ select
 from
     `exp_users` as `eut`
 left join
-    `subscription_matches` as `sta`
+    `subscription_matches_with_expected` as `sta`
 on
     `eut`.`unified_id` = `sta`.`exp_unified_id`
 left join

@@ -1,3 +1,31 @@
+expected trial -> charge, %:
+  - domain: "monetization"
+  - numerator: expected_charged_trial_cnt
+  - denominator: expected_trial_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "expected conversion rate from clean trials to charges"
+  - table_position: 1
+  - include_in_summary: false
+  - positive: 1
+  - suffix: "%"
+
+expected arpu, $:
+  - domain: "monetization"
+  - numerator: expected_revenue
+  - denominator: members
+  - percentage: false
+  - variance: arpu_var
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "average expected revenue per user with trial revenue modeled from subscription price and historical trial conversion"
+  - table_position: 1
+  - include_in_summary: false
+  - positive: 1
+  - prefix: "$"
+
 arpu, $:
   - domain: "monetization"
   - numerator: revenue

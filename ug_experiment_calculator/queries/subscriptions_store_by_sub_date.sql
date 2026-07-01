@@ -12,6 +12,8 @@ select
     `trial`,
     `funnel_source`,
     `product_id`,
+    `base_price`,
+    `country`,
     `user_id`,
     `unified_id`,
     `payment_account_id`,
@@ -21,7 +23,7 @@ select
     `is_access_intro`,
     `is_otp`,
     now() as `updated_at`,
-    toUInt16(7) as `source_version`
+    toUInt16(8) as `source_version`
 from (
     select
         `subscription_id`,
@@ -40,6 +42,8 @@ from (
         `trial`,
         `funnel_source`,
         `product_id`,
+        `base_price`,
+        `country`,
         `user_id`,
         `unified_id`,
         `payment_account_id`,
@@ -79,6 +83,8 @@ from (
             ) as `trial`,
             argMinIf(`use`.`funnel_source`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `funnel_source`,
             argMinIf(`use`.`product_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `product_id`,
+            argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `base_price`,
+            argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `country`,
             argMinIf(`use`.`user_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `user_id`,
             argMinIf(`use`.`unified_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `unified_id`,
             argMinIf(`use`.`payment_account_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `payment_account_id`,

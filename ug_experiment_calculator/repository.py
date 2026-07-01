@@ -29,8 +29,9 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 7
+SUBSCRIPTION_SOURCE_VERSION = 8
 EXPERIMENT_USERS_CACHE_VERSION = 2
+TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
     "updated_at": "DateTime",
 }
@@ -236,6 +237,7 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "subscriptions_cnt",
         "access_cnt",
         "charged_trial_cnt",
+        "expected_trial_cnt",
         "any_charged_trial_cnt",
         "active_charged_trial_cnt",
         "cancel_trial_cnt",
@@ -307,6 +309,8 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "refund_revenue",
         "recurrent_revenue",
         "trial_revenue",
+        "expected_charged_trial_cnt",
+        "expected_revenue",
         "active_trial_revenue",
         "lifetime_revenue",
         "arpu_var",
@@ -1499,6 +1503,29 @@ def _ensure_is_access_intro_column(table_name: str, *, config: Optional[Experime
     return True
 
 
+def _ensure_subscription_event_detail_columns(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    cfg = get_config(config)
+    changed = False
+    columns = {
+        "base_price": "Float64 default 0 after `product_id`",
+        "country": "String default '' after `base_price`",
+    }
+
+    for column_name, column_definition in columns.items():
+        if _table_has_column(table_name, column_name):
+            continue
+
+        query = f"""
+            alter table {table_name}
+            on cluster {cfg.cluster}
+            add column if not exists `{column_name}` {column_definition}
+        """
+        execute_sql_modify(query)
+        changed = True
+
+    return changed
+
+
 def _ensure_source_version_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
     cfg = get_config(config)
     if _table_has_column(table_name, "source_version"):
@@ -1577,6 +1604,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_payment_account_id_vector_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_is_access_intro_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
+        needs_full_refresh = _ensure_subscription_event_detail_columns(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_source_version_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _has_stale_source_version(cfg.subscriptions_table, config=cfg) or needs_full_refresh
 
@@ -1600,6 +1628,60 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         needs_full_refresh = _has_stale_source_version(cfg.subscription_transactions_table, config=cfg) or needs_full_refresh
 
     return needs_full_refresh
+
+
+def _get_table_max_update_date(table_name: str) -> Optional[datetime.date]:
+    query = f"""
+        select max(`update_dt`) as `max_update_dt`
+        from {table_name}
+    """
+    df = execute_sql(query)
+    max_update_dt = df["max_update_dt"].iloc[0]
+    if pd.isna(max_update_dt):
+        return None
+    if isinstance(max_update_dt, datetime.datetime):
+        return max_update_dt.date()
+    if isinstance(max_update_dt, datetime.date):
+        return max_update_dt
+    return datetime.datetime.strptime(str(max_update_dt)[:10], "%Y-%m-%d").date()
+
+
+def update_trial_conversion_model(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    table_name = TRIAL_CONVERSION_MODEL_TABLE
+    full_table_name = cfg.full_table(table_name)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        _create_table_from_select(
+            table_name,
+            "trial_conversion_model",
+            {"update_dt": today.strftime("%Y-%m-%d")},
+            "`update_dt`",
+            "`platform`, `tier`, `base_price_int`",
+            config=cfg,
+        )
+    else:
+        ensure_table_columns(
+            table_name,
+            {
+                "update_dt": "Date",
+                "base_price_label": "String",
+                "n_trials": "UInt64",
+                "n_converted": "UInt64",
+                "conversion": "Float64",
+            },
+            config=cfg,
+        )
+        max_update_dt = _get_table_max_update_date(full_table_name)
+        if max_update_dt is not None and max_update_dt >= today:
+            logger.info("Skipping trial conversion model update: %s already has update_dt=%s", full_table_name, max_update_dt)
+            return
+
+    query = get_query("trial_conversion_model", {"update_dt": today.strftime("%Y-%m-%d")}, config=cfg)
+    logger.info("Updating trial conversion model %s for update_dt=%s", full_table_name, today)
+    execute_sql_modify(f"insert into {full_table_name}\n{query}")
 
 
 def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:
@@ -2003,6 +2085,7 @@ def get_monetization_metrics(
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
+    cfg = get_config(config)
     query = get_query(
         "monetization_metrics",
         params={
@@ -2011,8 +2094,9 @@ def get_monetization_metrics(
             "client_sql": _clickhouse_string_literal(client),
             "segment_sql": _clickhouse_string_literal(segment_name),
             "segment_hash_sql": _clickhouse_string_literal(segment_hash),
+            "trial_conversion_model_table": cfg.full_table(TRIAL_CONVERSION_MODEL_TABLE),
         },
-        config=config,
+        config=cfg,
     )
     logger.info("total query:\n%s", query)
     return execute_sql(query)

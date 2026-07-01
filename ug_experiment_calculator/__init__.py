@@ -94,6 +94,7 @@ _EXPORTS = {
     "stats_columns_for_client": ("metrics", "stats_columns_for_client"),
     "update_exp_results_table": ("repository", "update_exp_results_table"),
     "update_subscription_source_tables": ("repository", "update_subscription_source_tables"),
+    "update_trial_conversion_model": ("repository", "update_trial_conversion_model"),
 }
 
 __all__ = sorted(_EXPORTS)

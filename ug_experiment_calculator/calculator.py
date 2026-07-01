@@ -46,6 +46,7 @@ from .repository import (
     UG_WEB_CLIENT,
     update_exp_results_table,
     update_subscription_source_tables,
+    update_trial_conversion_model,
 )
 from .rollout import update_rollout_split_users_daily
 
@@ -479,6 +480,8 @@ def calculate_exp_info(
     if cfg.update_subscription_sources:
         logger.info("Updating subscription source tables")
         update_subscription_source_tables(config=cfg)
+    logger.info("Updating trial conversion model")
+    update_trial_conversion_model(config=cfg)
 
     df_tot = {}
     stats_df_tot = {}

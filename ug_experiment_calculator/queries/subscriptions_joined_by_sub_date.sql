@@ -42,6 +42,8 @@ from (
         `use`.`trial` as `trial`,
         `use`.`funnel_source` as `funnel_source`,
         `use`.`product_id` as `product_id`,
+        ifNull(`sev`.`base_price`, 0) as `base_price`,
+        ifNull(`sev`.`country`, '') as `country`,
         `use`.`user_id` as `user_id`,
         `use`.`unified_id` as `unified_id`,
         `use`.`payment_account_id` as `payment_account_id`,
@@ -65,6 +67,38 @@ from (
         `use`.`product_code` = `trx`.`product_code`
     and
         toDate(`use`.`subscribed_dt`) = toDate(`trx`.`subscribed_dt`)
+    left join (
+        select
+            if(`original_subscription_id` != '', `original_subscription_id`, `use`.`subscription_id`) as `subscription_id`,
+            argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `product_code`,
+            minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `subscribed_dt`,
+            argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `base_price`,
+            argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `country`
+        from (
+            select
+                *,
+                `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`
+            from
+                `default`.`ug_subscriptions_events`
+            where
+                `event` = 'Subscribed'
+            and
+                `date` between date_start - interval 15 day and date_end
+        ) as `use`
+        group by
+            if(`original_subscription_id` != '', `original_subscription_id`, `use`.`subscription_id`),
+            toDate(`use`.`datetime`)
+        having
+            `subscribed_dt` > 0
+        and
+            `product_code` > 0
+    ) as `sev`
+    on
+        `use`.`subscription_id` = `sev`.`subscription_id`
+    and
+        `use`.`product_code` = `sev`.`product_code`
+    and
+        toDate(`use`.`subscribed_dt`) = toDate(`sev`.`subscribed_dt`)
     where
         toDate(`use`.`subscribed_dt`) between date_start - interval 15 day and date_end
     and
