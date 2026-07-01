@@ -30,7 +30,7 @@ from .config import ExperimentCalculatorConfig
 
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 8
-EXPERIMENT_USERS_CACHE_VERSION = 2
+EXPERIMENT_USERS_CACHE_VERSION = 3
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
     "updated_at": "DateTime",
@@ -938,7 +938,8 @@ def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) ->
         "user_filters_hash": get_user_filters_hash(segment, client=client, clients_options=clients_options),
         "client": client,
         "clients_options": clients_options,
-        "date_start": exp_info.get("date_start", 0),
+        "date_start": int(exp_info.get("date_start", 0) or 0),
+        "date_end": int(exp_info.get("date_end", 0) or 0),
         "experiment_event_start": exp_info.get("experiment_event_start", ""),
     }
 
@@ -1028,6 +1029,13 @@ MOBWEB_APP_USERS_SCHEMA = """
 
 def _exp_users_insert_columns_sql() -> str:
     return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
+
+
+def _exp_users_insert_prefix(table_name: str) -> str:
+    return f"""
+        insert into {table_name} ({_exp_users_insert_columns_sql()})
+        settings insert_deduplicate = 0
+    """
 
 
 def _quoted_identifier(name: str) -> str:
@@ -1204,7 +1212,7 @@ def _insert_mobweb_experiment_users_day(
         "app_users_table": app_users_table,
     }
     query_part_2 = get_query("exp_raw_data_mobweb_insert", params=final_params, config=cfg)
-    query = f"insert into {full_table_name} ({_exp_users_insert_columns_sql()})"
+    query = _exp_users_insert_prefix(full_table_name)
     query += "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
     logger.info("Inserting final mobweb experiment users table with query:\n%s", query)
     execute_sql_modify(query)
@@ -1828,7 +1836,7 @@ def create_experiment_users_table(
             )
             continue
 
-        query_part_1 = f"insert into {full_table_name} ({_exp_users_insert_columns_sql()})"
+        query_part_1 = _exp_users_insert_prefix(full_table_name)
         insert_query_name = exp_raw_data_query_name(
             client,
             segment,
@@ -1974,7 +1982,7 @@ def _insert_experiment_users_slice_segment(
                 select_columns.append(f"`base`.{_quoted_identifier(column)}")
         select_columns_sql = ",\n            ".join(select_columns)
         query = f"""
-            insert into {exp_users_table} ({_exp_users_insert_columns_sql()})
+            {_exp_users_insert_prefix(exp_users_table)}
             select
                 {select_columns_sql}
             from
