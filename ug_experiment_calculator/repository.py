@@ -31,6 +31,9 @@ from .config import ExperimentCalculatorConfig
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 7
 EXPERIMENT_USERS_CACHE_VERSION = 2
+EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
+    "updated_at": "DateTime",
+}
 
 UG_WEB_CLIENT = "UG_WEB"
 UG_WEB_DESKTOP_CLIENT = "UG_WEB DESKTOP"
@@ -346,6 +349,20 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
 
+    if "updated_at" in df.columns:
+        df["updated_at"] = pd.to_datetime(df["updated_at"], errors="coerce").astype("datetime64[ns]")
+
+    return df
+
+
+def with_output_updated_at(df: pd.DataFrame, updated_at: Optional[datetime.datetime] = None) -> pd.DataFrame:
+    df = df.copy()
+    if updated_at is None:
+        updated_at = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    elif updated_at.tzinfo is not None:
+        updated_at = updated_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+
+    df["updated_at"] = pd.Series([updated_at] * len(df), index=df.index, dtype="datetime64[ns]")
     return df
 
 
@@ -2133,6 +2150,7 @@ def get_funnel_metrics(
 
 def create_results_table(table_name: str, df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     cfg = get_config(config)
+    df = with_output_updated_at(df)
     schema = pandas_to_clickhouse_types(df)
     query = create_table_sql(
         table_name,
@@ -2178,7 +2196,7 @@ def ensure_table_columns(
         if _table_has_column(full_table_name, column_name):
             continue
 
-        default_value = "''" if "String" in column_type else "0"
+        default_value = _default_value_for_clickhouse_type(column_type)
         query = f"""
             alter table {full_table_name}
             on cluster {cfg.cluster}
@@ -2187,8 +2205,21 @@ def ensure_table_columns(
         execute_sql_modify(query)
 
 
+def _default_value_for_clickhouse_type(column_type: str) -> str:
+    normalized_type = column_type.strip().lower()
+    if "string" in normalized_type:
+        return "''"
+    if normalized_type.startswith("datetime"):
+        return "toDateTime(0)"
+    if normalized_type.startswith("date"):
+        return "toDate(0)"
+    return "0"
+
+
 def update_exp_results_table(df: pd.DataFrame, table: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     cfg = get_config(config)
+    ensure_table_columns(table, EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS, config=cfg)
+    df = with_output_updated_at(df)
     insert_df_by_chunks(cfg.full_table(table), df)
 
 
