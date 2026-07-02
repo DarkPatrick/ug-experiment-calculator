@@ -15,7 +15,7 @@ select
     argMin(`urew`.`user_id`, `urew`.`datetime`) AS `user_id`,
     toUInt32(0) AS `payment_account_id`,
     argMin(`urew`.`country`, `urew`.`datetime`) AS `country`,
-    argMin(`urew`.`auth`, `urew`.`datetime`) AS `auth`,
+    toUInt8OrZero(toString(argMin(`urew`.`auth`, `urew`.`datetime`))) AS `auth`,
     toInt64(0) AS `app_unified_id`,
     toUInt8(0) AS `has_app`,
     arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urew`.`unified_id`)])) AS `subscription_unified_ids`,
