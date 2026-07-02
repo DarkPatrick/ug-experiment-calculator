@@ -761,7 +761,10 @@ def is_mixed_web_experiment(exp_info: dict) -> bool:
     if UG_WEB_CLIENT not in exp_info.get("clients_list", []):
         return False
     client_options = _client_options_from_exp_info(exp_info, UG_WEB_CLIENT)
-    has_desktop, has_mobweb = _platform_bucket_flags(_collect_platform_values(client_options))
+    platform_values = _collect_platform_values(client_options)
+    if not platform_values:
+        return True
+    has_desktop, has_mobweb = _platform_bucket_flags(platform_values)
     return has_desktop and has_mobweb
 
 

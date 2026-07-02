@@ -144,9 +144,9 @@ segments: {
 
 - `platform = [1]` считается обычным web и использует `exp_raw_data_web*.sql`.
 - Любые mobweb-платформы (`[2]`, `[2, 3]`) используют `exp_raw_data_mobweb*.sql`.
-- Mixed web-конфиг, где для `UG_WEB` одновременно есть `platform = 1` и любая platform `> 1`, разворачивается в два расчетных клиента: `UG_WEB DESKTOP`, затем `UG_WEB MOBWEB`. Это не segments/slices: exp users, метрики, статистики, forecast и итоговые report-блоки пишутся и отображаются как разные clients, аналогично отдельным app-клиентам.
+- Mixed web-конфиг, где для `UG_WEB` одновременно есть `platform = 1` и любая platform `> 1`, разворачивается в два расчетных клиента: `UG_WEB DESKTOP`, затем `UG_WEB MOBWEB`. Отсутствие platform-опции у `UG_WEB` тоже считается mixed web-конфигом: эксперимент запущен на все web-платформы, поэтому desktop и mobweb считаются отдельно. Это не segments/slices: exp users, метрики, статистики, forecast и итоговые report-блоки пишутся и отображаются как разные clients, аналогично отдельным app-клиентам.
 - В mixed web-расчете desktop-блок получает desktop/web product-метрики, mobweb-блок получает mobweb-specific product-метрики; `mobweb_app_*` не попадают в desktop, а `web_*` product-метрики не попадают в mobweb.
-- Если для `UG_WEB` нет platform-опции, расчет выбирает mobweb-шаблон, чтобы не потерять mobile web аудиторию.
+- Внутри mixed web-расчета desktop-блок использует desktop-шаблон, а mobweb-блок использует mobweb-шаблон, чтобы не терять mobile web аудиторию.
 
 В `exp_users_{exp_id}` есть дополнительные поля для mobweb-сценария:
 
