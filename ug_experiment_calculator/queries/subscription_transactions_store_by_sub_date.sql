@@ -26,7 +26,7 @@ select
         arrayEnumerate(`all_charges_arr`)
     ) as `all_charges_arr_uniq`,
     now() as `updated_at`,
-    toUInt16(8) as `source_version`
+    toUInt16(9) as `source_version`
 from (
     select
         `sub`.`subscription_id` as `subscription_id`,
@@ -42,7 +42,10 @@ from (
             toUnixTimestamp(`use`.`datetime`) >= `sub`.`subscribed_dt`
             and toUnixTimestamp(`use`.`datetime`) < `sub`.`next_subscribed_dt`
             and (
-                `use`.`original_subscription_id` != ''
+                (
+                    lower(`use`.`platform`) not like '%ios%'
+                    and `use`.`original_subscription_id` != ''
+                )
                 or `use`.`product_code` = `sub`.`product_code`
             )
         ) as `datetime_ts`
@@ -74,9 +77,9 @@ from (
     ) as `use`
     on
         if(
-            `use`.`original_subscription_id` != '',
-            `use`.`original_subscription_id`,
-            `use`.`subscription_id`
+            lower(`use`.`platform`) like '%ios%' or `use`.`original_subscription_id` = '',
+            `use`.`subscription_id`,
+            `use`.`original_subscription_id`
         ) = `sub`.`subscription_id`
     group by
         `sub`.`subscription_id`,

@@ -29,7 +29,7 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 8
+SUBSCRIPTION_SOURCE_VERSION = 9
 EXPERIMENT_USERS_CACHE_VERSION = 6
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {

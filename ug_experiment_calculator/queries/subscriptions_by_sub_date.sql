@@ -31,12 +31,12 @@ select
 from (
     select
         if(
-            `original_subscription_id` != '',
-            `original_subscription_id`,
-            `use`.`subscription_id`
+            lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',
+            `use`.`subscription_id`,
+            `original_subscription_id`
         ) as `subscription_id`,
-        argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `product_code`,
-        minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `subscribed_dt`,
+        argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `product_code`,
+        minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `subscribed_dt`,
         -- IMPORTANT!: temporary condition
         -- minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` in ('Subscribed', 'Autorenew Enabled')) as `subscribed_dt`,
         minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Charged') as `charge_dt`,
@@ -44,16 +44,16 @@ from (
         minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Refunded') as `refund_dt`,
         minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Autorenew Enabled') as `reenable_dt`,
         minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` in ('Upgrade', 'Crossgrade')) as `upgrade_dt`,
-        argMinIf(`use`.`platform`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `platform`,
+        argMinIf(`use`.`platform`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `platform`,
         argMinIf(
             case
                 when `use`.`datetime_next_billing` < `use`.`datetime` then toUnixTimestamp(`use`.`datetime`)
                 else toUnixTimestamp(`use`.`datetime_next_billing`)
             end,
-            `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = ''
+            `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')
         ) as `first_charge_expected_dt`,
         greatest(
-            argMinIf(`use`.`trial`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = ''),
+            argMinIf(`use`.`trial`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')),
             if(
                 toDate(`first_charge_expected_dt`) > toDate(`subscribed_dt`)
                 and toDate(`charge_dt`) != toDate(`subscribed_dt`),
@@ -61,14 +61,14 @@ from (
                 0
             )
         ) as `trial`,
-        argMinIf(`use`.`funnel_source`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `funnel_source`,
-        argMinIf(`use`.`product_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `product_id`,
-        argMinIf(`use`.`user_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `user_id`,
-        argMinIf(`use`.`unified_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `unified_id`,
-        argMinIf(`use`.`payment_account_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `payment_account_id`,
-        argMinIf(`use`.`service_name`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `service_name`,
-        argMinIf(`use`.`duration_count`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `duration_count`,
-        toUInt8(countIf(`original_subscription_id` != '') > 0) as `is_access_intro`,
+        argMinIf(`use`.`funnel_source`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `funnel_source`,
+        argMinIf(`use`.`product_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `product_id`,
+        argMinIf(`use`.`user_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `user_id`,
+        argMinIf(`use`.`unified_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `unified_id`,
+        argMinIf(`use`.`payment_account_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `payment_account_id`,
+        argMinIf(`use`.`service_name`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `service_name`,
+        argMinIf(`use`.`duration_count`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `duration_count`,
+        toUInt8(countIf(lower(`use`.`platform`) not like '%ios%' and `original_subscription_id` != '') > 0) as `is_access_intro`,
         if (
             `is_access_intro` = 0
             and (
@@ -116,9 +116,14 @@ from (
         (`where_condition`)
     group by
         if(
-            `original_subscription_id` != '',
-            `original_subscription_id`,
-            `use`.`subscription_id`
+            lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',
+            `use`.`subscription_id`,
+            `original_subscription_id`
+        ),
+        if(
+            lower(`use`.`platform`) like '%ios%',
+            `use`.`product_code`,
+            0
         )
     having
         toDate(`subscribed_dt`) between date_start - interval 15 day and date_end

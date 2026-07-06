@@ -69,11 +69,15 @@ from (
         toDate(`use`.`subscribed_dt`) = toDate(`trx`.`subscribed_dt`)
     left join (
         select
-            if(`original_subscription_id` != '', `original_subscription_id`, `use`.`subscription_id`) as `subscription_id`,
-            argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `product_code`,
-            minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `subscribed_dt`,
-            argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `base_price`,
-            argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and `original_subscription_id` = '') as `country`
+            if(
+                lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',
+                `use`.`subscription_id`,
+                `original_subscription_id`
+            ) as `subscription_id`,
+            argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `product_code`,
+            minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `subscribed_dt`,
+            argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `base_price`,
+            argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `country`
         from (
             select
                 *,
@@ -86,7 +90,16 @@ from (
                 `date` between date_start - interval 15 day and date_end
         ) as `use`
         group by
-            if(`original_subscription_id` != '', `original_subscription_id`, `use`.`subscription_id`),
+            if(
+                lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',
+                `use`.`subscription_id`,
+                `original_subscription_id`
+            ),
+            if(
+                lower(`use`.`platform`) like '%ios%',
+                `use`.`product_code`,
+                0
+            ),
             toDate(`use`.`datetime`)
         having
             `subscribed_dt` > 0
