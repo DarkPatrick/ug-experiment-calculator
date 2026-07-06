@@ -19,7 +19,7 @@ select
     toInt64(0) AS `app_unified_id`,
     toUInt8(1) AS `has_app`,
     arrayDistinct(arrayFilter(x -> x > 0, [toInt64(`urea`.`unified_id`)])) AS `subscription_unified_ids`,
-    multiIf(lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))) in ('android', 'ios', 'os x', 'windows'), lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))), '( Other )') AS `os`,
+    multiIf(lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))) in ('android', 'ios'), lower(toString(argMin(`urea`.`os`, `urea`.`datetime`))), '( Other )') AS `os`,
     '' AS `browser`,
     cast([], 'Array(UInt32)') AS `frontend_release_version`,
     cast([], 'Array(UInt32)') AS `backend_release_version`,

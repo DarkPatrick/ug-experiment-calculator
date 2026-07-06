@@ -30,7 +30,7 @@ from .config import ExperimentCalculatorConfig
 
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 8
-EXPERIMENT_USERS_CACHE_VERSION = 4
+EXPERIMENT_USERS_CACHE_VERSION = 5
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
     "updated_at": "DateTime",
@@ -1571,6 +1571,59 @@ def delete_experiment_users_segment(
     if int(exists_df.iloc[0].values[0]) == 0:
         return
     _delete_exp_users_segment(table_name, client, segment_name, config=cfg)
+
+
+def cleanup_obsolete_experiment_segments(
+    exp_info: dict,
+    exp_users_table: str,
+    client: str,
+    active_segment_names: set[str],
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    if not active_segment_names:
+        return
+
+    exists_df = execute_sql(f"exists {exp_users_table}")
+    if int(exists_df.iloc[0].values[0]) == 0:
+        return
+
+    query = f"""
+        select distinct
+            `segment`
+        from {exp_users_table}
+        where
+            `client` = {_clickhouse_string_literal(client)}
+    """
+    df = execute_sql(query)
+    existing_segments = {str(segment) for segment in df["segment"].dropna().tolist()}
+    obsolete_segments = sorted(existing_segments - set(active_segment_names))
+    if not obsolete_segments:
+        return
+
+    output_exp_id = experiment_output_exp_id(exp_info)
+    for segment_name in obsolete_segments:
+        logger.info(
+            "Cleaning obsolete experiment segment for exp_id=%s, client=%s, segment=%s",
+            output_exp_id,
+            client,
+            segment_name,
+        )
+        _delete_exp_users_segment(exp_users_table, client, segment_name, config=cfg)
+        for table_name in (
+            "ug_exp_results",
+            "ug_exp_stats",
+            "ug_exp_funnel_results",
+            "ug_exp_funnel_stats",
+        ):
+            drop_exp_partitions(
+                output_exp_id,
+                client_name=client,
+                segment=segment_name,
+                table_name=table_name,
+                config=cfg,
+            )
 
 
 def _ensure_exp_users_segment_hash(
