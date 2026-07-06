@@ -18,6 +18,7 @@ from .metrics import (
     stats_columns_for_client,
 )
 from .repository import (
+    cleanup_obsolete_experiment_clients,
     cleanup_obsolete_experiment_segments,
     create_exp_funnel_results_table,
     create_exp_funnel_stats_table,
@@ -529,6 +530,12 @@ def calculate_exp_info(
         retention_cache = {}
         tab_view_cache = {}
         product_metrics_segments = {}
+        exp_users_table = ""
+        active_client_names = {
+            str(client_info["clients_list"][0])
+            for client_info in client_contexts
+            if client_info.get("clients_list")
+        }
 
         for client_exp_info in client_contexts:
             client = client_exp_info["clients_list"][0]
@@ -593,6 +600,14 @@ def calculate_exp_info(
                     active_segment_names,
                     config=cfg,
                 )
+
+        if exp_users_table:
+            cleanup_obsolete_experiment_clients(
+                exp_info,
+                exp_users_table,
+                active_client_names,
+                config=cfg,
+            )
 
         if update_rollout and exp_info.get("is_latest_launch", True):
             logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])

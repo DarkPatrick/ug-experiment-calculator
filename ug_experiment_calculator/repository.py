@@ -1596,6 +1596,59 @@ def delete_experiment_users_segment(
     _delete_exp_users_segment(table_name, client, segment_name, config=cfg)
 
 
+def _df_string_values(df: pd.DataFrame, column: str) -> set[str]:
+    if df.empty or column not in df.columns:
+        return set()
+    return {str(value) for value in df[column].dropna().tolist()}
+
+
+def _df_client_segments(df: pd.DataFrame) -> set[tuple[str, str]]:
+    if df.empty or "client" not in df.columns or "segment" not in df.columns:
+        return set()
+    return {
+        (str(row.client), str(row.segment))
+        for row in df[["client", "segment"]].dropna().itertuples(index=False)
+    }
+
+
+def _partition_client_segments(
+    exp_id: int,
+    table_name: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> set[tuple[str, str]]:
+    cfg = get_config(config)
+    table = cfg.physical_table(table_name)
+    query = f"""
+        select distinct
+            partition
+        from clusterAllReplicas('{cfg.cluster}', system.parts)
+        where
+            database = '{cfg.database}'
+        and
+            table = '{table}'
+        and
+            active
+        and
+            partition like '%,{exp_id},%'
+    """
+    df = execute_sql(query)
+    result = set()
+    for partition in _df_string_values(df, "partition"):
+        try:
+            _, partition_exp_id, partition_client, partition_segment = partition.strip("()").split(",", 3)
+        except ValueError:
+            logger.warning("Skipping unexpected partition format for table=%s: %s", table, partition)
+            continue
+        if str(partition_exp_id).strip() != str(exp_id):
+            continue
+        client = partition_client.strip().strip("'")
+        segment = partition_segment.strip().strip("'")
+        if client and segment:
+            result.add((client, segment))
+    return result
+
+
 def cleanup_obsolete_experiment_segments(
     exp_info: dict,
     exp_users_table: str,
@@ -1620,12 +1673,24 @@ def cleanup_obsolete_experiment_segments(
             `client` = {_clickhouse_string_literal(client)}
     """
     df = execute_sql(query)
-    existing_segments = {str(segment) for segment in df["segment"].dropna().tolist()}
+    existing_segments = _df_string_values(df, "segment")
+    output_exp_id = experiment_output_exp_id(exp_info)
+    output_tables = (
+        "ug_exp_results",
+        "ug_exp_stats",
+        "ug_exp_funnel_results",
+        "ug_exp_funnel_stats",
+    )
+    for table_name in output_tables:
+        existing_segments.update(
+            segment
+            for partition_client, segment in _partition_client_segments(output_exp_id, table_name, config=cfg)
+            if partition_client == client
+        )
     obsolete_segments = sorted(existing_segments - set(active_segment_names))
     if not obsolete_segments:
         return
 
-    output_exp_id = experiment_output_exp_id(exp_info)
     for segment_name in obsolete_segments:
         logger.info(
             "Cleaning obsolete experiment segment for exp_id=%s, client=%s, segment=%s",
@@ -1634,12 +1699,66 @@ def cleanup_obsolete_experiment_segments(
             segment_name,
         )
         _delete_exp_users_segment(exp_users_table, client, segment_name, config=cfg)
-        for table_name in (
-            "ug_exp_results",
-            "ug_exp_stats",
-            "ug_exp_funnel_results",
-            "ug_exp_funnel_stats",
-        ):
+        for table_name in output_tables:
+            drop_exp_partitions(
+                output_exp_id,
+                client_name=client,
+                segment=segment_name,
+                table_name=table_name,
+                config=cfg,
+            )
+
+
+def cleanup_obsolete_experiment_clients(
+    exp_info: dict,
+    exp_users_table: str,
+    active_clients: set[str],
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    if not active_clients:
+        return
+
+    existing_pairs: set[tuple[str, str]] = set()
+    exists_df = execute_sql(f"exists {exp_users_table}")
+    if int(exists_df.iloc[0].values[0]) != 0:
+        query = f"""
+            select distinct
+                `client`,
+                `segment`
+            from {exp_users_table}
+        """
+        existing_pairs.update(_df_client_segments(execute_sql(query)))
+
+    output_exp_id = experiment_output_exp_id(exp_info)
+    output_tables = (
+        "ug_exp_results",
+        "ug_exp_stats",
+        "ug_exp_funnel_results",
+        "ug_exp_funnel_stats",
+    )
+    for table_name in output_tables:
+        existing_pairs.update(_partition_client_segments(output_exp_id, table_name, config=cfg))
+
+    obsolete_pairs = sorted(
+        (client, segment)
+        for client, segment in existing_pairs
+        if client not in active_clients
+    )
+    if not obsolete_pairs:
+        return
+
+    for client, segment_name in obsolete_pairs:
+        logger.info(
+            "Cleaning obsolete experiment client segment for exp_id=%s, client=%s, segment=%s",
+            output_exp_id,
+            client,
+            segment_name,
+        )
+        if int(exists_df.iloc[0].values[0]) != 0:
+            _delete_exp_users_segment(exp_users_table, client, segment_name, config=cfg)
+        for table_name in output_tables:
             drop_exp_partitions(
                 output_exp_id,
                 client_name=client,
