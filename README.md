@@ -97,18 +97,19 @@ calculate_exp_info(123456, config=config)
 1. Читает информацию об эксперименте через SQL-шаблон `get_ug_exp_info.sql`.
 2. Парсит `clients_list`, `project` и `segments` из конфигурации эксперимента.
 3. Читает историю стартов/остановок из `mysql_u_guitarcom.ab_experiment_history` (`event_id = 5` старт, `event_id = 6` остановка) и строит launch-окна. Самый свежий launch считается основным и пишется под обычным `exp_id`; предыдущие launch-окна получают `exp_launch_id` вида `{exp_id}_launch_1`.
-4. Если `update_subscription_sources=True`, обновляет таблицы `subscriptions` и `subscriptions_transactions`.
-5. Для каждой пары `(client, segment)` создает или обновляет таблицу пользователей `exp_users_{exp_launch_id}`.
+4. Внутри каждого launch-окна восстанавливает исторически активные клиенты из `experiment_attributes` в `ab_experiment_history`. Если client был удален во время эксперимента, он продолжает считаться до timestamp удаления: новые users для него больше не добавляются, но накопленные users остаются основой для метрик и статистик.
+5. Если `update_subscription_sources=True`, обновляет таблицы `subscriptions` и `subscriptions_transactions`.
+6. Для каждой пары `(client, segment)` создает или обновляет таблицу пользователей `exp_users_{exp_launch_id}`.
    Если в сегменте указан `slice`, создает derived-сегменты из уже готового users-cache без повторного скана сырых событий.
-6. Создает временную таблицу подписок `exp_subscription_{exp_launch_id}_{session_id}`.
-7. Читает monetization-агрегаты через `monetization_metrics.sql`.
-8. Читает retention-агрегаты через `retention_metrics.sql` и подмешивает их к обычным метрикам.
-9. Читает и считает воронки, разрешенные для текущей платформы.
-10. Считает накопленные агрегаты по метрикам и воронкам.
-11. Считает pairwise-статистику, где контрольная вариация всегда `1`.
-12. Перезаписывает партиции текущего `output_exp_id/client/segment` в результирующих таблицах.
-13. Удаляет временную таблицу подписок.
-14. Если `update_rollout=True`, обновляет rollout split-users таблицы `rollout_split_users_{exp_id}` и `ug_exp_rollout_split_users` только для самого свежего launch.
+7. Создает временную таблицу подписок `exp_subscription_{exp_launch_id}_{session_id}`.
+8. Читает monetization-агрегаты через `monetization_metrics.sql`.
+9. Читает retention-агрегаты через `retention_metrics.sql` и подмешивает их к обычным метрикам.
+10. Читает и считает воронки, разрешенные для текущей платформы.
+11. Считает накопленные агрегаты по метрикам и воронкам.
+12. Считает pairwise-статистику, где контрольная вариация всегда `1`.
+13. Перезаписывает партиции текущего `output_exp_id/client/segment` в результирующих таблицах.
+14. Удаляет временную таблицу подписок.
+15. Если `update_rollout=True`, обновляет rollout split-users таблицы `rollout_split_users_{exp_id}` и `ug_exp_rollout_split_users` только для самого свежего launch.
 
 Если таблица результата еще не существует, она создается по схеме датафрейма. Если существует, пакет удаляет только партиции текущего launch-окна, платформы и сегмента, а затем вставляет свежие строки. Для предыдущих launch-окон используется отдельный числовой `output_exp_id`, поэтому замена остается через `DROP PARTITION`, без `DELETE WHERE`. В каждой результирующей строке хранится `updated_at` - дата-время записи свежих данных; для партиции это время последнего пересчета ее строк.
 
@@ -123,7 +124,7 @@ calculate_exp_info(123456, config=config)
 | `exp_users_{exp_launch_id}` | Пользователи launch-окна эксперимента с `client`, `segment`, `segment_hash`. |
 | `exp_subscription_{exp_launch_id}_{session_id}` | Временная таблица подписок для одного запуска расчета. |
 
-`exp_users_{exp_launch_id}` переиспользуется между запусками. `segment_hash` считается по фильтрам сегмента и контексту набора пользователей: `client`, `clients_options`, `experiment_event_start`, `date_start`. Если этот хэш изменился, строки сегмента удаляются и собираются заново.
+`exp_users_{exp_launch_id}` переиспользуется между запусками. `segment_hash` считается по фильтрам сегмента и контексту набора пользователей: `client`, `clients_options`, `experiment_event_start`, `date_start`, `date_end`. Если этот хэш изменился, строки сегмента удаляются и собираются заново. Для client-ов, удаленных во время активного launch-а, `date_end` берется из истории изменения клиента, поэтому users после удаления не добираются, а уже набранный сегмент продолжает участвовать в итоговых расчетах.
 
 ### Slice-сегменты
 

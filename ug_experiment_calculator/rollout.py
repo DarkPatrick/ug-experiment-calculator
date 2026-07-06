@@ -18,8 +18,9 @@ from .repository import (
     base_client_for_calculation,
     create_experiment_users_table,
     create_table_sql,
-    expand_experiment_clients,
     get_experiment,
+    get_experiment_client_contexts,
+    get_experiment_clients,
     get_experiment_users_hash,
     get_query,
     is_mobweb_segment,
@@ -54,9 +55,11 @@ def calculate_rollout_share(
     """
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(cfg.default_clients)
-    selected_clients = expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+    selected_clients = get_experiment_clients(
+        exp_info,
+        list(clients) if clients is not None else None,
+        config=cfg,
+    )
     segment = _segment_by_name(exp_info, segment_name)
 
     exp_start_dt, exp_end_dt = _experiment_interval(exp_info)
@@ -73,9 +76,17 @@ def calculate_rollout_share(
 
     exp_users_table = ""
     if ensure_experiment_users:
+        context_exp_info = dict(exp_info)
+        if not context_exp_info.get("clients_list"):
+            context_exp_info["clients_list"] = list(cfg.default_clients)
+        client_contexts = {
+            client_info["clients_list"][0]: client_info
+            for client_info in get_experiment_client_contexts(context_exp_info, config=cfg)
+        }
         for client in selected_clients:
+            client_exp_info = client_contexts.get(client, context_exp_info)
             logger.info("Ensuring experiment users for exp_id=%s, client=%s, segment=%s", exp_id, client, segment_name)
-            exp_users_table = create_experiment_users_table(exp_info, client, segment_name, segment, config=cfg)
+            exp_users_table = create_experiment_users_table(client_exp_info, client, segment_name, segment, config=cfg)
     else:
         exp_users_table = cfg.full_table(f"exp_users_{exp_id}")
 
@@ -125,9 +136,11 @@ def calculate_rollout_impact_estimate(
 ) -> pd.DataFrame:
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(cfg.default_clients)
-    selected_clients = expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+    selected_clients = get_experiment_clients(
+        exp_info,
+        list(clients) if clients is not None else None,
+        config=cfg,
+    )
     period_end = date_end or (datetime.datetime.now(datetime.timezone.utc).date() - datetime.timedelta(days=1))
     period_start = period_end - datetime.timedelta(days=lookback_days - 1)
     logger.info(

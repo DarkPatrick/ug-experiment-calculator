@@ -30,7 +30,7 @@ from .config import ExperimentCalculatorConfig
 
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 8
-EXPERIMENT_USERS_CACHE_VERSION = 3
+EXPERIMENT_USERS_CACHE_VERSION = 4
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
     "updated_at": "DateTime",
@@ -627,6 +627,187 @@ def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalcul
     return launches
 
 
+def get_experiment_client_contexts(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
+    base_id = experiment_base_id(exp_info)
+    launch_start = int(exp_info.get("date_start", 0) or 0)
+    launch_end = int(exp_info.get("date_end", 0) or 0)
+    history_rows = _get_experiment_history_rows(base_id)
+    if history_rows.empty:
+        return _current_experiment_client_contexts(exp_info)
+
+    state = _initial_client_history_state(exp_info)
+    for row in history_rows.itertuples(index=False):
+        date_created = int(row.date_created)
+        if date_created > launch_start:
+            break
+        _apply_client_history_attrs(state, _parse_history_attributes(row.experiment_attributes))
+
+    contexts_by_client: dict[str, dict] = {}
+    segment_start = launch_start
+    history_max_date = int(history_rows["date_created"].max() or 0)
+    current_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    boundary_end = launch_end if launch_end > launch_start else max(current_ts, history_max_date)
+    relevant_rows = [
+        row
+        for row in history_rows.itertuples(index=False)
+        if launch_start < int(row.date_created) <= boundary_end
+    ]
+
+    for row in relevant_rows:
+        date_created = int(row.date_created)
+        if date_created > segment_start:
+            _add_client_contexts_from_state(contexts_by_client, exp_info, state, segment_start, date_created - 1)
+        _apply_client_history_attrs(state, _parse_history_attributes(row.experiment_attributes))
+        segment_start = date_created
+
+    final_end = launch_end if launch_end > launch_start else 0
+    _add_client_contexts_from_state(contexts_by_client, exp_info, state, segment_start, final_end)
+
+    if not contexts_by_client:
+        return _current_experiment_client_contexts(exp_info)
+
+    launch_clients = list(exp_info.get("clients_list") or [])
+    ordered_clients = []
+    for client in [*launch_clients, *contexts_by_client.keys()]:
+        if client not in ordered_clients and client in contexts_by_client:
+            ordered_clients.append(client)
+
+    return [contexts_by_client[client] for client in ordered_clients]
+
+
+def get_experiment_clients(
+    exp_info: dict,
+    clients: list[str] | tuple[str, ...] | None = None,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> list[str]:
+    cfg = get_config(config)
+    base_exp_info = dict(exp_info)
+    if not base_exp_info.get("clients_list"):
+        base_exp_info["clients_list"] = list(cfg.default_clients)
+
+    if clients is None:
+        return _unique_ordered_client_context_values(get_experiment_client_contexts(base_exp_info, config=cfg))
+
+    requested_clients = [str(client) for client in clients]
+    requested_expanded = expand_experiment_clients(base_exp_info, requested_clients)
+    requested_lookup = set(requested_clients) | set(requested_expanded)
+
+    context_clients = []
+    for client_info in get_experiment_client_contexts(base_exp_info, config=cfg):
+        context_client = str(client_info["clients_list"][0])
+        if context_client in requested_lookup or base_client_for_calculation(context_client) in requested_lookup:
+            context_clients.append(context_client)
+
+    result = []
+    for client in [*requested_expanded, *context_clients]:
+        if client not in result:
+            result.append(client)
+    return result
+
+
+def _unique_ordered_client_context_values(client_contexts: list[dict]) -> list[str]:
+    result = []
+    for client_info in client_contexts:
+        client = str(client_info["clients_list"][0])
+        if client not in result:
+            result.append(client)
+    return result
+
+
+def _get_experiment_history_rows(exp_id: int) -> pd.DataFrame:
+    query = f"""
+        select
+            `event_id`,
+            `date_created`,
+            `experiment_attributes`
+        from `mysql_u_guitarcom`.`ab_experiment_history`
+        where
+            `experiment_id` = {exp_id}
+        order by
+            `date_created`,
+            `id`
+    """
+    return execute_sql(query)
+
+
+def _current_experiment_client_contexts(exp_info: dict) -> list[dict]:
+    result = []
+    for client in exp_info.get("clients_list") or []:
+        client_info = dict(exp_info)
+        client_info["clients_list"] = [client]
+        result.append(client_info)
+    return result
+
+
+def _initial_client_history_state(exp_info: dict) -> dict:
+    return {
+        "clients": list(exp_info.get("clients_list") or []),
+        "clients_options": exp_info.get("clients_options", ""),
+    }
+
+
+def _parse_history_attributes(value: object) -> dict:
+    if isinstance(value, dict):
+        return value
+    parsed = _parse_configuration_value(str(value))
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _history_clients(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return re.findall(r"(\w+)", value)
+    if isinstance(value, (list, tuple, set)):
+        return [str(client) for client in value if str(client)]
+    return None
+
+
+def _apply_client_history_attrs(state: dict, attrs: dict) -> None:
+    clients = _history_clients(attrs.get("clients"))
+    if clients is not None:
+        state["clients"] = clients
+    if "clients_options" in attrs:
+        state["clients_options"] = attrs.get("clients_options") or ""
+
+
+def _add_client_contexts_from_state(
+    contexts_by_client: dict[str, dict],
+    exp_info: dict,
+    state: dict,
+    date_start: int,
+    date_end: int,
+) -> None:
+    if date_end and date_end < date_start:
+        return
+
+    state_info = dict(exp_info)
+    state_info["clients_list"] = list(state.get("clients") or [])
+    state_info["clients_options"] = state.get("clients_options", "")
+    expanded_clients = expand_experiment_clients(state_info)
+    for client in expanded_clients:
+        previous = contexts_by_client.get(client)
+        client_info = dict(state_info)
+        client_info["clients_list"] = [client]
+        client_info["date_start"] = min(int(previous["date_start"]), date_start) if previous else int(date_start)
+        client_info["date_end"] = _merge_client_context_end(
+            previous.get("date_end") if previous else None,
+            date_end,
+        )
+        contexts_by_client[client] = client_info
+
+
+def _merge_client_context_end(previous_end: object, next_end: int) -> int:
+    if previous_end is None:
+        return int(next_end or 0)
+    previous_end_int = int(previous_end or 0)
+    next_end_int = int(next_end or 0)
+    if previous_end_int == 0 or next_end_int == 0:
+        return 0
+    return max(previous_end_int, next_end_int)
+
+
 def _with_experiment_launch_context(
     exp_info: dict,
     date_start: int,
@@ -942,6 +1123,7 @@ def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) ->
         "client": client,
         "clients_options": clients_options,
         "date_start": int(exp_info.get("date_start", 0) or 0),
+        "date_end": int(exp_info.get("date_end", 0) or 0),
         "experiment_event_start": exp_info.get("experiment_event_start", ""),
     }
 

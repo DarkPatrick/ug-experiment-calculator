@@ -352,14 +352,12 @@ def get_experiment_confluence_report_code(
     ensure_experiment_users: bool = False,
     daily_users_by_client: Any = None,
 ) -> str:
-    from .repository import expand_experiment_clients, get_experiment
+    from .repository import get_experiment, get_experiment_clients
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(cfg.default_clients)
     selected_clients = _ordered_report_clients(
-        expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+        get_experiment_clients(exp_info, list(clients) if clients is not None else None, config=cfg)
     )
 
     forecast_code = get_rollout_impact_confluence_table_code(
@@ -540,14 +538,12 @@ def get_design_reality_check_confluence_table_code(
     thousands_separator: bool = True,
     srm_alpha: float = 0.001,
 ) -> str:
-    from .repository import expand_experiment_clients, get_experiment
+    from .repository import get_experiment, get_experiment_clients
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(cfg.default_clients)
     selected_clients = _ordered_report_clients(
-        expand_experiment_clients(exp_info, list(clients) if clients is not None else None)
+        get_experiment_clients(exp_info, list(clients) if clients is not None else None, config=cfg)
     )
     variations = list(range(1, int(exp_info.get("variations") or 0) + 1))
     experiment_rows = get_experiment_stats_confluence_table_data(
@@ -1719,12 +1715,10 @@ def _expand_report_query_clients(
     if clients is None:
         return None
 
-    from .repository import expand_experiment_clients, get_experiment
+    from .repository import get_experiment, get_experiment_clients
 
     exp_info = get_experiment(exp_id, config=config)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(config.default_clients)
-    return expand_experiment_clients(exp_info, list(clients))
+    return get_experiment_clients(exp_info, list(clients), config=config)
 
 
 def _report_client_sort_key(client: str) -> tuple[int, int, str]:

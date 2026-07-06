@@ -35,6 +35,7 @@ from .repository import (
     experiment_output_exp_id,
     expand_experiment_clients,
     get_experiment,
+    get_experiment_client_contexts,
     get_experiment_launches,
     get_experiment_users_hash,
     get_funnel_metrics,
@@ -510,13 +511,28 @@ def calculate_exp_info(
         if UG_WEB_CLIENT in source_clients and UG_WEB_CLIENT not in expanded_clients:
             _drop_obsolete_web_client_outputs(output_exp_id, exp_info.get("segments", {}).keys(), config=cfg)
 
+        client_contexts = get_experiment_client_contexts(exp_info, config=cfg)
+        logger.info(
+            "Experiment %s client contexts for exp_launch_id=%s: %s",
+            exp_id,
+            launch_id,
+            [
+                {
+                    "client": client_info["clients_list"][0],
+                    "date_start": client_info["date_start"],
+                    "date_end": client_info["date_end"],
+                }
+                for client_info in client_contexts
+            ],
+        )
         retention_cache = {}
         tab_view_cache = {}
         product_metrics_segments = {}
 
-        for client in exp_info["clients_list"]:
-            for segment_name, segment in exp_info["segments"].items():
-                segment_hash = get_experiment_users_hash(exp_info, client, segment)
+        for client_exp_info in client_contexts:
+            client = client_exp_info["clients_list"][0]
+            for segment_name, segment in client_exp_info["segments"].items():
+                segment_hash = get_experiment_users_hash(client_exp_info, client, segment)
                 logger.info(
                     "Calculating experiment info for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
                     output_exp_id,
@@ -524,14 +540,14 @@ def calculate_exp_info(
                     client,
                     segment_name,
                 )
-                logger.info("Experiment info:\n%s", exp_info)
+                logger.info("Experiment info:\n%s", client_exp_info)
 
                 logger.info("Loading users")
-                exp_users_table = create_experiment_users_table(exp_info, client, segment_name, segment, config=cfg)
+                exp_users_table = create_experiment_users_table(client_exp_info, client, segment_name, segment, config=cfg)
                 segment_items = [(segment_name, segment, segment_hash)]
                 segment_items.extend(
                     create_experiment_users_slice_segments(
-                        exp_info,
+                        client_exp_info,
                         exp_users_table,
                         client,
                         segment_name,
@@ -550,7 +566,7 @@ def calculate_exp_info(
                         current_segment_name,
                     )
                     subscription_table = _calculate_exp_segment_info(
-                        exp_info=exp_info,
+                        exp_info=client_exp_info,
                         funnels_config=funnels_config,
                         exp_users_table=exp_users_table,
                         client=client,

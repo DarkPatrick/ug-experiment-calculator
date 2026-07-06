@@ -464,12 +464,10 @@ def _expand_summary_query_clients(
     if clients is None:
         return None
 
-    from .repository import expand_experiment_clients, get_experiment
+    from .repository import get_experiment, get_experiment_clients
 
     exp_info = get_experiment(exp_id, config=config)
-    if not exp_info.get("clients_list"):
-        exp_info["clients_list"] = list(config.default_clients)
-    return expand_experiment_clients(exp_info, list(clients))
+    return get_experiment_clients(exp_info, list(clients), config=config)
 
 
 def _format_text(value: Any) -> str:
