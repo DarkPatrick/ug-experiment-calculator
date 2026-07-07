@@ -10,7 +10,8 @@ import random
 import re
 import string
 import textwrap
-from typing import Optional
+import time
+from typing import Iterable, Optional
 
 from clickhouse_worker import (
     ClickHouseQueryError,
@@ -1273,9 +1274,6 @@ MOBWEB_APP_USERS_SCHEMA = """
 )
 """
 
-MOBWEB_STAGE_TABLES_PREPARED: set[str] = set()
-
-
 def _exp_users_insert_columns_sql() -> str:
     return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
 
@@ -1403,18 +1401,129 @@ def _ensure_mobweb_stage_table(
 ) -> str:
     cfg = get_config(config)
     full_table_name = cfg.full_table(table_name)
-    if full_table_name not in MOBWEB_STAGE_TABLES_PREPARED:
-        drop_table(full_table_name, config=cfg, client=client)
-        MOBWEB_STAGE_TABLES_PREPARED.add(full_table_name)
-
-    is_exists = execute_sql(f"exists {full_table_name}")
-    if int(is_exists.iloc[0].values[0]) == 1:
+    if _table_exists(full_table_name, client=client):
+        _ensure_table_schema_columns(full_table_name, schema, config=cfg, client=client)
         return full_table_name
 
     query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
     logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
     _execute_sql_modify(query, client=client)
+    _wait_for_table_exists(full_table_name, client=client)
     return full_table_name
+
+
+def _schema_column_definitions(schema: str) -> list[tuple[str, str]]:
+    columns = []
+    for line in schema.splitlines():
+        match = re.match(r"\s*`([^`]+)`\s+(.+?)(?:,)?\s*$", line)
+        if not match:
+            continue
+        column_name, column_type = match.groups()
+        columns.append((column_name, column_type))
+    return columns
+
+
+def _ensure_table_schema_columns(
+    full_table_name: str,
+    schema: str,
+    *,
+    config: ExperimentCalculatorConfig,
+    client=None,
+) -> None:
+    database, short_table_name = _database_and_physical_table(full_table_name, config=config)
+    columns_query = f"""
+        select
+            `name`
+        from system.columns
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `table` = {_clickhouse_string_literal(short_table_name)}
+    """
+    if client is None:
+        columns_df = execute_sql(columns_query)
+        existing_columns = set(_df_string_values(columns_df, "name"))
+    else:
+        result = client.query(columns_query)
+        existing_columns = {str(row[0]) for row in result.result_rows or []}
+
+    missing_columns = []
+    for column_name, column_type in _schema_column_definitions(schema):
+        if column_name in existing_columns:
+            continue
+        missing_columns.append(column_name)
+        query = f"""
+            alter table {full_table_name}
+            on cluster {config.cluster}
+            add column if not exists `{column_name}` {column_type}
+        """
+        _execute_sql_modify(query, client=client)
+
+    if missing_columns:
+        _wait_for_table_columns(full_table_name, missing_columns, config=config, client=client)
+
+
+def _table_exists(full_table_name: str, *, client=None) -> bool:
+    query = f"exists {full_table_name}"
+    if client is None:
+        is_exists = execute_sql(query)
+        return int(is_exists.iloc[0].values[0]) == 1
+
+    result = client.query(query)
+    return bool(result.result_rows and int(result.result_rows[0][0]) == 1)
+
+
+def _wait_for_table_exists(
+    full_table_name: str,
+    *,
+    client=None,
+    timeout_seconds: float = 60.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _table_exists(full_table_name, client=client):
+            return
+        if time.monotonic() >= deadline:
+            raise ClickHouseQueryError(f"Timed out waiting for ClickHouse table {full_table_name} to be created")
+        time.sleep(0.5)
+
+
+def _wait_for_table_columns(
+    full_table_name: str,
+    column_names: Iterable[str],
+    *,
+    config: ExperimentCalculatorConfig,
+    client=None,
+    timeout_seconds: float = 60.0,
+) -> None:
+    expected_columns = set(column_names)
+    database, short_table_name = _database_and_physical_table(full_table_name, config=config)
+    names_sql = ", ".join(_clickhouse_string_literal(name) for name in expected_columns)
+    query = f"""
+        select
+            `name`
+        from system.columns
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `table` = {_clickhouse_string_literal(short_table_name)}
+        and
+            `name` in ({names_sql})
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if client is None:
+            columns_df = execute_sql(query)
+            visible_columns = set(_df_string_values(columns_df, "name"))
+        else:
+            result = client.query(query)
+            visible_columns = {str(row[0]) for row in result.result_rows or []}
+        if expected_columns <= visible_columns:
+            return
+        if time.monotonic() >= deadline:
+            missing = ", ".join(sorted(expected_columns - visible_columns))
+            raise ClickHouseQueryError(f"Timed out waiting for columns on {full_table_name}: {missing}")
+        time.sleep(0.5)
 
 
 def _delete_mobweb_stage_day(
