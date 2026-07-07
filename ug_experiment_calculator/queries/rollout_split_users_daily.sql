@@ -7,6 +7,7 @@ with
 select
     toUInt32(`exp_id_value`) as `exp_id`,
     {client_sql} as `client`,
+    {config_hash_sql} as `config_hash`,
     toUInt64(`{alias}`.`unified_id`) as `unified_id`,
     toUInt16(`{alias}`.`experiments.variation`[indexOf(`{alias}`.`experiments.id`, `exp_id_value`)]) as `variation`,
     min(`{alias}`.`datetime`) as `first_split_dt`
@@ -20,6 +21,8 @@ left join (
         {split_users_table}
     where
         `client` = {client_sql}
+    and
+        `config_hash` = {config_hash_sql}
 ) as `saved`
 on
     `saved`.`client` = {client_sql}

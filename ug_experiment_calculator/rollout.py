@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any, Iterable, Optional
@@ -18,6 +20,7 @@ from .repository import (
     base_client_for_calculation,
     create_experiment_users_table,
     create_table_sql,
+    drop_table,
     get_experiment,
     get_experiment_client_contexts,
     get_experiment_clients,
@@ -35,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 ROLLOUT_SPLIT_USERS_TABLE = "ug_exp_rollout_split_users"
+ROLLOUT_SPLIT_USERS_CACHE_VERSION = 1
 DEFAULT_IMPACT_LOOKBACK_DAYS = 14
 
 
@@ -244,17 +248,20 @@ def update_rollout_split_users_daily(
         return table_name
 
     split_users_table = _ensure_rollout_split_users_raw_table(exp_info, config=cfg)
+    client_hashes = {client: get_rollout_split_users_hash(exp_info, client) for client in selected_clients}
     days_cnt = (exp_end_dt.date() - exp_start_dt.date()).days
 
     for client in selected_clients:
+        split_users_hash = client_hashes[client]
         for day in range(days_cnt + 1):
             current_day = exp_start_dt + datetime.timedelta(days=day)
-            if not _should_insert_rollout_split_users_day(split_users_table, current_day, client):
+            if not _should_insert_rollout_split_users_day(split_users_table, current_day, client, split_users_hash):
                 logger.info(
-                    "Skipping rollout split users insert for exp_id=%s, client=%s, date=%s",
+                    "Skipping rollout split users insert for exp_id=%s, client=%s, date=%s, hash=%s",
                     exp_id,
                     client,
                     current_day.strftime("%Y-%m-%d"),
+                    split_users_hash,
                 )
                 continue
 
@@ -263,21 +270,23 @@ def update_rollout_split_users_daily(
                 client,
                 current_day=current_day,
                 split_users_table=split_users_table,
+                split_users_hash=split_users_hash,
                 config=cfg,
             )
             insert_query = f"insert into {split_users_table} ({_rollout_split_users_raw_columns_sql()})\n{query}"
             logger.info(
-                "Inserting rollout split users for exp_id=%s, client=%s, date=%s",
+                "Inserting rollout split users for exp_id=%s, client=%s, date=%s, hash=%s",
                 exp_id,
                 client,
                 current_day.strftime("%Y-%m-%d"),
+                split_users_hash,
             )
             execute_sql_modify(insert_query)
 
     _refresh_rollout_split_users_daily(
         exp_id,
         split_users_table,
-        selected_clients,
+        client_hashes,
         exp_start_dt.date(),
         exp_end_dt.date(),
         config=cfg,
@@ -445,6 +454,14 @@ def _ensure_rollout_split_users_raw_table(
     full_table_name = config.full_table(table_name)
     is_exists = execute_sql(f"exists {full_table_name}")
     if int(is_exists.iloc[0].values[0]) == 1:
+        if _rollout_split_users_raw_table_needs_recreate(full_table_name):
+            logger.info("Recreating rollout split users raw table %s due to schema/cache-key change", full_table_name)
+            drop_table(full_table_name, config=config)
+        else:
+            return full_table_name
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 1:
         return full_table_name
 
     query = create_table_sql(
@@ -452,12 +469,13 @@ def _ensure_rollout_split_users_raw_table(
         schema="""(
             `exp_id` UInt32,
             `client` String,
+            `config_hash` String,
             `unified_id` UInt64,
             `variation` UInt16,
             `first_split_dt` DateTime
         )""",
-        partition="toYYYYMM(toDate(`first_split_dt`)), `client`",
-        sorting="`client`, `first_split_dt`, `unified_id`",
+        partition="toDate(`first_split_dt`, 'UTC'), `client`, `config_hash`",
+        sorting="`client`, `config_hash`, `first_split_dt`, `unified_id`",
         config=config,
     )
     logger.info("Creating rollout split users raw table with query:\n%s", query)
@@ -470,13 +488,52 @@ def _rollout_split_users_raw_table_name(exp_id: int) -> str:
 
 
 def _rollout_split_users_raw_columns_sql() -> str:
-    return ", ".join(f"`{column}`" for column in ("exp_id", "client", "unified_id", "variation", "first_split_dt"))
+    return ", ".join(
+        f"`{column}`"
+        for column in ("exp_id", "client", "config_hash", "unified_id", "variation", "first_split_dt")
+    )
+
+
+def _rollout_split_users_raw_table_needs_recreate(full_table_name: str) -> bool:
+    database, short_table_name = full_table_name.split(".", 1)
+    columns_query = f"""
+        select groupArray(`name`) as `columns`
+        from system.columns
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `table` = {_clickhouse_string_literal(short_table_name)}
+    """
+    columns_df = execute_sql(columns_query)
+    columns = set(columns_df["columns"].iloc[0] or [])
+    if "config_hash" not in columns:
+        return True
+
+    table_query = f"""
+        select
+            `partition_key`,
+            `sorting_key`
+        from system.tables
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `name` = {_clickhouse_string_literal(short_table_name)}
+        limit 1
+    """
+    table_df = execute_sql(table_query)
+    if table_df.empty:
+        return False
+
+    partition_key = str(table_df["partition_key"].iloc[0] or "")
+    sorting_key = str(table_df["sorting_key"].iloc[0] or "")
+    return "config_hash" not in partition_key or "config_hash" not in sorting_key
 
 
 def _should_insert_rollout_split_users_day(
     table_name: str,
     current_day: datetime.datetime,
     client: str,
+    split_users_hash: str,
 ) -> bool:
     current_day_str = current_day.strftime("%Y-%m-%d")
     query = f"""
@@ -486,6 +543,8 @@ def _should_insert_rollout_split_users_day(
         from {table_name}
         where
             `client` = {_clickhouse_string_literal(client)}
+        and
+            `config_hash` = {_clickhouse_string_literal(split_users_hash)}
     """
     df = execute_sql(query)
     rows_for_day = int(df["rows_for_day"].iloc[0] or 0)
@@ -554,16 +613,23 @@ def _month_date_range(date_start: datetime.date, date_end: datetime.date) -> tup
 def _refresh_rollout_split_users_daily(
     exp_id: int,
     split_users_table: str,
-    clients: Iterable[str],
+    client_hashes: Mapping[str, str],
     date_start: datetime.date,
     date_end: datetime.date,
     *,
     config: ExperimentCalculatorConfig,
 ) -> None:
-    selected_clients = list(clients)
+    selected_clients = list(client_hashes)
     clients_sql = _clients_in_sql(selected_clients)
     if not clients_sql:
         return
+    client_hash_filters = " or ".join(
+        (
+            f"(`client` = {_clickhouse_string_literal(client)} "
+            f"and `config_hash` = {_clickhouse_string_literal(split_users_hash)})"
+        )
+        for client, split_users_hash in client_hashes.items()
+    )
 
     refresh_start, refresh_end = _month_date_range(date_start, date_end)
 
@@ -579,6 +645,8 @@ def _refresh_rollout_split_users_daily(
         from {split_users_table}
         where
             `client` in ({clients_sql})
+        and
+            ({client_hash_filters})
         and
             `exp_id` = {int(exp_id)}
         and
@@ -607,6 +675,7 @@ def _rollout_split_users_daily_query(
     *,
     current_day: datetime.datetime,
     split_users_table: str,
+    split_users_hash: str,
     config: ExperimentCalculatorConfig,
 ) -> str:
     exp_start_dt, exp_end_dt = _experiment_interval(exp_info)
@@ -626,6 +695,7 @@ def _rollout_split_users_daily_query(
             "date_start_ts": int(exp_start_dt.timestamp()),
             "date_end_ts": int(exp_end_dt.timestamp()),
             "client_sql": _clickhouse_string_literal(client),
+            "config_hash_sql": _clickhouse_string_literal(split_users_hash),
             "source_client_sql": _clickhouse_string_literal(source_client),
             "events_table": events_table,
             "alias": alias,
@@ -634,6 +704,27 @@ def _rollout_split_users_daily_query(
         },
         config=config,
     )
+
+
+def get_rollout_split_users_hash(exp_info: dict, client: str) -> str:
+    clients_options = exp_info.get("clients_options", "")
+    segment = _segment_by_name(exp_info, "Total")
+    source_client = source_client_for_calculation(client)
+    events_table, _alias, platform_filter = _split_events_source(client, segment, clients_options=clients_options)
+    hash_config = {
+        "cache_version": ROLLOUT_SPLIT_USERS_CACHE_VERSION,
+        "query": "rollout_split_users_daily",
+        "exp_id": int(exp_info["id"]),
+        "client": client,
+        "source_client": source_client,
+        "clients_options": clients_options,
+        "events_table": events_table,
+        "platform_filter": platform_filter,
+        "date_start": int(exp_info.get("date_start", 0) or 0),
+        "date_end": int(exp_info.get("date_end", 0) or 0),
+    }
+    config_json = json.dumps(hash_config, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(config_json.encode("utf-8")).hexdigest()
 
 
 def _split_events_source(client: str, segment: dict, *, clients_options: object = "") -> tuple[str, str, str]:
