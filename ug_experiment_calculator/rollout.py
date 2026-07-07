@@ -20,7 +20,6 @@ from .repository import (
     base_client_for_calculation,
     create_experiment_users_table,
     create_table_sql,
-    drop_table,
     get_experiment,
     get_experiment_client_contexts,
     get_experiment_clients,
@@ -454,14 +453,7 @@ def _ensure_rollout_split_users_raw_table(
     full_table_name = config.full_table(table_name)
     is_exists = execute_sql(f"exists {full_table_name}")
     if int(is_exists.iloc[0].values[0]) == 1:
-        if _rollout_split_users_raw_table_needs_recreate(full_table_name):
-            logger.info("Recreating rollout split users raw table %s due to schema/cache-key change", full_table_name)
-            drop_table(full_table_name, config=config)
-        else:
-            return full_table_name
-
-    is_exists = execute_sql(f"exists {full_table_name}")
-    if int(is_exists.iloc[0].values[0]) == 1:
+        _ensure_rollout_split_users_raw_config_hash_column(full_table_name, config=config)
         return full_table_name
 
     query = create_table_sql(
@@ -474,7 +466,7 @@ def _ensure_rollout_split_users_raw_table(
             `variation` UInt16,
             `first_split_dt` DateTime
         )""",
-        partition="toDate(`first_split_dt`, 'UTC'), `client`, `config_hash`",
+        partition="toYYYYMM(toDate(`first_split_dt`)), `client`",
         sorting="`client`, `config_hash`, `first_split_dt`, `unified_id`",
         config=config,
     )
@@ -494,39 +486,33 @@ def _rollout_split_users_raw_columns_sql() -> str:
     )
 
 
-def _rollout_split_users_raw_table_needs_recreate(full_table_name: str) -> bool:
+def _ensure_rollout_split_users_raw_config_hash_column(
+    full_table_name: str,
+    *,
+    config: ExperimentCalculatorConfig,
+) -> None:
     database, short_table_name = full_table_name.split(".", 1)
     columns_query = f"""
-        select groupArray(`name`) as `columns`
+        select count() as `columns_cnt`
         from system.columns
         where
             `database` = {_clickhouse_string_literal(database)}
         and
             `table` = {_clickhouse_string_literal(short_table_name)}
+        and
+            `name` = 'config_hash'
     """
     columns_df = execute_sql(columns_query)
-    columns = set(columns_df["columns"].iloc[0] or [])
-    if "config_hash" not in columns:
-        return True
+    if int(columns_df["columns_cnt"].iloc[0] or 0) > 0:
+        return
 
-    table_query = f"""
-        select
-            `partition_key`,
-            `sorting_key`
-        from system.tables
-        where
-            `database` = {_clickhouse_string_literal(database)}
-        and
-            `name` = {_clickhouse_string_literal(short_table_name)}
-        limit 1
+    query = f"""
+        alter table {full_table_name}
+        on cluster {config.cluster}
+        add column if not exists `config_hash` String default ''
     """
-    table_df = execute_sql(table_query)
-    if table_df.empty:
-        return False
-
-    partition_key = str(table_df["partition_key"].iloc[0] or "")
-    sorting_key = str(table_df["sorting_key"].iloc[0] or "")
-    return "config_hash" not in partition_key or "config_hash" not in sorting_key
+    logger.info("Adding config_hash column to rollout split users raw table %s", full_table_name)
+    execute_sql_modify(query)
 
 
 def _should_insert_rollout_split_users_day(
