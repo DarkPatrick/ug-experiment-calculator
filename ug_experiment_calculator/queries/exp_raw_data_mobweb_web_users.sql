@@ -7,6 +7,9 @@ with
     if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`
 
 select
+    {client_sql} as `client`,
+    {segment_sql} as `segment`,
+    {segment_hash_sql} as `segment_hash`,
     toInt64(`urew`.`unified_id`) as `unified_id`,
     toUInt32(`urew`.`experiments.variation`[indexOf(`urew`.`experiments.id`, `exp_id`)]) as `variation`,
     toUInt32(min(toUnixTimestamp(`urew`.`datetime`))) as `exp_start_dt`,
@@ -55,6 +58,9 @@ and
 and
     `urew`.`platform` > 1
 group by
+    `client`,
+    `segment`,
+    `segment_hash`,
     `unified_id`,
     `variation`
 having

@@ -507,30 +507,48 @@ def _delete_rollout_split_users(
     *,
     config: ExperimentCalculatorConfig,
 ) -> None:
-    clients_sql = _clients_in_sql(clients)
-    if not clients_sql:
+    selected_clients = list(clients)
+    if not selected_clients:
         return
 
-    query = f"""
-        alter table {config.full_table(ROLLOUT_SPLIT_USERS_TABLE)}
-        on cluster {config.cluster}
-        delete where
-            `exp_id` = {int(exp_id)}
-        and
-            `client` in ({clients_sql})
-        and
-            `dt` between toDate('{date_start:%Y-%m-%d}') and toDate('{date_end:%Y-%m-%d}')
-        settings mutations_sync = 1
-    """
     logger.info(
-        "Deleting rollout split users aggregate for exp_id=%s, clients=%s, period=%s - %s",
+        "Dropping rollout split users aggregate partitions for exp_id=%s, clients=%s, period=%s - %s",
         exp_id,
-        list(clients),
+        selected_clients,
         date_start,
         date_end,
     )
-    execute_sql_modify(query)
-    logger.info("Finished deleting rollout split users aggregate for exp_id=%s", exp_id)
+    for year_month in _iter_year_months(date_start, date_end):
+        for client in selected_clients:
+            query = f"""
+                alter table {config.full_table(ROLLOUT_SPLIT_USERS_TABLE)}
+                on cluster {config.cluster}
+                drop partition ({year_month}, {int(exp_id)}, {_clickhouse_string_literal(client)})
+            """
+            execute_sql_modify(query)
+    logger.info("Finished dropping rollout split users aggregate partitions for exp_id=%s", exp_id)
+
+
+def _iter_year_months(date_start: datetime.date, date_end: datetime.date) -> Iterable[int]:
+    current = date_start.replace(day=1)
+    end = date_end.replace(day=1)
+
+    while current <= end:
+        yield current.year * 100 + current.month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+
+def _month_date_range(date_start: datetime.date, date_end: datetime.date) -> tuple[datetime.date, datetime.date]:
+    start = date_start.replace(day=1)
+    end_month = date_end.replace(day=1)
+    if end_month.month == 12:
+        next_month = end_month.replace(year=end_month.year + 1, month=1)
+    else:
+        next_month = end_month.replace(month=end_month.month + 1)
+    return start, next_month - datetime.timedelta(days=1)
 
 
 def _refresh_rollout_split_users_daily(
@@ -547,7 +565,9 @@ def _refresh_rollout_split_users_daily(
     if not clients_sql:
         return
 
-    _delete_rollout_split_users(exp_id, selected_clients, date_start, date_end, config=config)
+    refresh_start, refresh_end = _month_date_range(date_start, date_end)
+
+    _delete_rollout_split_users(exp_id, selected_clients, refresh_start, refresh_end, config=config)
 
     query = f"""
         insert into {config.full_table(ROLLOUT_SPLIT_USERS_TABLE)}
@@ -562,7 +582,7 @@ def _refresh_rollout_split_users_daily(
         and
             `exp_id` = {int(exp_id)}
         and
-            toDate(`first_split_dt`, 'UTC') between toDate('{date_start:%Y-%m-%d}') and toDate('{date_end:%Y-%m-%d}')
+            toDate(`first_split_dt`, 'UTC') between toDate('{refresh_start:%Y-%m-%d}') and toDate('{refresh_end:%Y-%m-%d}')
         group by
             `dt`,
             `client`

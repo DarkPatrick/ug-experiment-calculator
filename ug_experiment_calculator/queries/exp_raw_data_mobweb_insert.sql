@@ -1,3 +1,6 @@
+with
+    toDate('{date_filter}') as `date_filter`
+
 select
     `wu`.`unified_id` as `unified_id`,
     `wu`.`variation` as `variation`,
@@ -25,23 +28,55 @@ from
 left join
     {web_installs_table} as `wi`
 on
+    `wu`.`client` = `wi`.`client`
+and
+    `wu`.`segment` = `wi`.`segment`
+and
+    `wu`.`segment_hash` = `wi`.`segment_hash`
+and
     `wu`.`unified_id` = `wi`.`unified_id`
 and
     `wu`.`variation` = `wi`.`variation`
+and
+    `wu`.`exp_start_dt` = `wi`.`exp_start_dt`
 left join
     (
         select
+            `client`,
+            `segment`,
+            `segment_hash`,
             `unified_id`,
             `variation`,
+            `exp_start_dt`,
             argMin(`app_unified_id`, `app_start_dt`) as `app_unified_id`,
             argMin(`app_payment_account_id`, `app_start_dt`) as `app_payment_account_id`
         from
             {app_users_table}
         group by
+            `client`,
+            `segment`,
+            `segment_hash`,
             `unified_id`,
-            `variation`
+            `variation`,
+            `exp_start_dt`
     ) as `au`
 on
+    `wu`.`client` = `au`.`client`
+and
+    `wu`.`segment` = `au`.`segment`
+and
+    `wu`.`segment_hash` = `au`.`segment_hash`
+and
     `wu`.`unified_id` = `au`.`unified_id`
 and
     `wu`.`variation` = `au`.`variation`
+and
+    `wu`.`exp_start_dt` = `au`.`exp_start_dt`
+where
+    `wu`.`client` = {client_sql}
+and
+    `wu`.`segment` = {segment_sql}
+and
+    `wu`.`segment_hash` = {segment_hash_sql}
+and
+    toDate(`wu`.`exp_start_dt`, 'UTC') = `date_filter`

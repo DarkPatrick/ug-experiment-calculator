@@ -178,6 +178,58 @@ def drop_exp_partitions(
         client.close()
 
 
+def _database_and_physical_table(table_name: str, *, config: ExperimentCalculatorConfig) -> tuple[str, str]:
+    if "." in table_name:
+        return tuple(table_name.split(".", 1))
+    return config.database, config.physical_table(table_name)
+
+
+def _drop_active_partitions(
+    table_name: str,
+    partition_filter_sql: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    client=None,
+) -> int:
+    cfg = get_config(config)
+    database, physical_table = _database_and_physical_table(table_name, config=cfg)
+    partitions_query = f"""
+        select distinct
+            `partition`
+        from clusterAllReplicas('{cfg.cluster}', system.parts)
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `table` = {_clickhouse_string_literal(physical_table)}
+        and
+            `active`
+        and
+            ({partition_filter_sql})
+        order by
+            `partition`
+    """
+    if client is None:
+        partitions_df = execute_sql(partitions_query)
+        partitions = _df_string_values(partitions_df, "partition")
+    else:
+        result = client.query(partitions_query)
+        partitions = {str(row[0]) for row in result.result_rows or []}
+    if not partitions:
+        logger.info("No active partitions found for %s matching %s", table_name, partition_filter_sql)
+        return 0
+
+    for partition in sorted(partitions):
+        query = f"""
+            alter table {database}.{physical_table}
+            on cluster {cfg.cluster}
+            drop partition {partition}
+        """
+        logger.info("Dropping partition %s from %s.%s", partition, database, physical_table)
+        _execute_sql_modify(query, client=client)
+
+    return len(partitions)
+
+
 def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
@@ -1171,6 +1223,9 @@ EXP_USERS_COLUMNS = (
 
 MOBWEB_WEB_USERS_SCHEMA = """
 (
+    `client` String,
+    `segment` String,
+    `segment_hash` String,
     `unified_id` Int64,
     `variation` UInt32,
     `exp_start_dt` UInt32,
@@ -1193,8 +1248,12 @@ MOBWEB_WEB_USERS_SCHEMA = """
 
 MOBWEB_WEB_INSTALLS_SCHEMA = """
 (
+    `client` String,
+    `segment` String,
+    `segment_hash` String,
     `unified_id` Int64,
     `variation` UInt32,
+    `exp_start_dt` UInt32,
     `install_payment_account_id` UInt64,
     `install_dt` DateTime
 )
@@ -1202,13 +1261,19 @@ MOBWEB_WEB_INSTALLS_SCHEMA = """
 
 MOBWEB_APP_USERS_SCHEMA = """
 (
+    `client` String,
+    `segment` String,
+    `segment_hash` String,
     `unified_id` Int64,
     `variation` UInt32,
+    `exp_start_dt` UInt32,
     `app_unified_id` Int64,
     `app_payment_account_id` UInt64,
     `app_start_dt` DateTime
 )
 """
+
+MOBWEB_STAGE_TABLES_PREPARED: set[str] = set()
 
 
 def _exp_users_insert_columns_sql() -> str:
@@ -1284,14 +1349,8 @@ def _identifier_part(value: object) -> str:
     return text or "empty"
 
 
-def _mobweb_stage_table_name(storage_id: str, client: str, segment_hash: str, current_day: datetime.datetime, stage: str) -> str:
-    return (
-        f"exp_users_{storage_id}_mobweb_"
-        f"{_identifier_part(stage)}_"
-        f"{_identifier_part(client)}_"
-        f"{segment_hash[:12]}_"
-        f"{current_day.strftime('%Y%m%d')}"
-    )
+def _mobweb_stage_table_name(storage_id: str, stage: str) -> str:
+    return f"exp_users_{storage_id}_mobweb_{_identifier_part(stage)}"
 
 
 def _recreate_mobweb_stage_table(
@@ -1333,6 +1392,59 @@ def _create_mobweb_stage_table(
     return full_table_name
 
 
+def _ensure_mobweb_stage_table(
+    table_name: str,
+    *,
+    schema: str,
+    partition: str,
+    sorting: str,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    client=None,
+) -> str:
+    cfg = get_config(config)
+    full_table_name = cfg.full_table(table_name)
+    if full_table_name not in MOBWEB_STAGE_TABLES_PREPARED:
+        drop_table(full_table_name, config=cfg, client=client)
+        MOBWEB_STAGE_TABLES_PREPARED.add(full_table_name)
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 1:
+        return full_table_name
+
+    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
+    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
+    _execute_sql_modify(query, client=client)
+    return full_table_name
+
+
+def _delete_mobweb_stage_day(
+    table_name: str,
+    current_day: datetime.datetime,
+    client_name: str,
+    segment_name: str,
+    segment_hash: str,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+    client=None,
+) -> None:
+    cfg = get_config(config)
+    current_day_str = current_day.strftime("%Y-%m-%d")
+    logger.info("Dropping mobweb stage partition from %s for date=%s", table_name, current_day_str)
+    _drop_active_partitions(
+        table_name,
+        " and ".join(
+            [
+                f"`partition` like {_clickhouse_string_literal(f'%{current_day_str}%')}",
+                f"`partition` like {_clickhouse_string_literal(f'%{client_name}%')}",
+                f"`partition` like {_clickhouse_string_literal(f'%{segment_name}%')}",
+                f"`partition` like {_clickhouse_string_literal(f'%{segment_hash}%')}",
+            ]
+        ),
+        config=cfg,
+        client=client,
+    )
+
+
 def _insert_mobweb_experiment_users_day(
     full_table_name: str,
     exp_info: dict,
@@ -1363,35 +1475,50 @@ def _insert_mobweb_experiment_users_day(
     } | _experiment_time_params(exp_info)
 
     try:
-        web_users_table = _recreate_mobweb_stage_table(
-            _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "web_users"),
+        web_users_table = _ensure_mobweb_stage_table(
+            _mobweb_stage_table_name(storage_id, "web_users"),
+            schema=MOBWEB_WEB_USERS_SCHEMA,
+            partition="toDate(`exp_start_dt`, 'UTC'), `client`, `segment`, `segment_hash`",
+            sorting="client, segment_hash, exp_start_dt, unified_id, variation",
+            config=cfg,
+            client=clickhouse_client,
+        )
+        _delete_mobweb_stage_day(web_users_table, current_day, client, segment_name, segment_hash, config=cfg, client=clickhouse_client)
+        _insert_into_table_from_select(
+            web_users_table,
             "exp_raw_data_mobweb_web_users",
             common_params,
-            schema=MOBWEB_WEB_USERS_SCHEMA,
-            partition="toYYYYMM(toDate(exp_start_dt))",
-            sorting="unified_id, variation",
             config=cfg,
             client=clickhouse_client,
         )
+
         web_installs_params = common_params | {"web_users_table": web_users_table}
-        web_installs_table = _recreate_mobweb_stage_table(
-            _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "web_installs"),
+        web_installs_table = _ensure_mobweb_stage_table(
+            _mobweb_stage_table_name(storage_id, "web_installs"),
+            schema=MOBWEB_WEB_INSTALLS_SCHEMA,
+            partition="toDate(`exp_start_dt`, 'UTC'), `client`, `segment`, `segment_hash`",
+            sorting="client, segment_hash, exp_start_dt, unified_id, variation",
+            config=cfg,
+            client=clickhouse_client,
+        )
+        _delete_mobweb_stage_day(web_installs_table, current_day, client, segment_name, segment_hash, config=cfg, client=clickhouse_client)
+        _insert_into_table_from_select(
+            web_installs_table,
             "exp_raw_data_mobweb_web_installs",
             web_installs_params,
-            schema=MOBWEB_WEB_INSTALLS_SCHEMA,
-            partition="toYYYYMM(toDate(install_dt))",
-            sorting="unified_id, variation",
             config=cfg,
             client=clickhouse_client,
         )
-        app_users_table = _create_mobweb_stage_table(
-            _mobweb_stage_table_name(storage_id, client, segment_hash, current_day, "app_users"),
+
+        app_users_table = _ensure_mobweb_stage_table(
+            _mobweb_stage_table_name(storage_id, "app_users"),
             schema=MOBWEB_APP_USERS_SCHEMA,
-            partition="toYYYYMM(toDate(app_start_dt))",
-            sorting="unified_id, variation",
+            partition="toDate(`exp_start_dt`, 'UTC'), `client`, `segment`, `segment_hash`",
+            sorting="client, segment_hash, exp_start_dt, unified_id, variation",
             config=cfg,
             client=clickhouse_client,
         )
+        _delete_mobweb_stage_day(app_users_table, current_day, client, segment_name, segment_hash, config=cfg, client=clickhouse_client)
         exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
         if exp_info["date_end"] > exp_info["date_start"]:
             exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
@@ -1475,6 +1602,28 @@ def _iter_half_year_blocks(date_start: datetime.date, date_end: datetime.date):
         block_end = min(next_block_start - datetime.timedelta(days=1), date_end)
         yield block_start, block_end
         block_start = next_block_start
+
+
+def _iter_year_months(date_start: datetime.date, date_end: datetime.date):
+    current = date_start.replace(day=1)
+    end = date_end.replace(day=1)
+
+    while current <= end:
+        yield current.year * 100 + current.month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+
+
+def _month_date_range(date_start: datetime.date, date_end: datetime.date) -> tuple[datetime.date, datetime.date]:
+    start = date_start.replace(day=1)
+    end_month = date_end.replace(day=1)
+    if end_month.month == 12:
+        next_month = end_month.replace(year=end_month.year + 1, month=1)
+    else:
+        next_month = end_month.replace(month=end_month.month + 1)
+    return start, next_month - datetime.timedelta(days=1)
 
 
 def _get_table_max_subscribed_date(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> Optional[datetime.date]:
@@ -1568,17 +1717,15 @@ def _delete_exp_users_segment(
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> None:
     cfg = get_config(config)
-    query = f"""
-        alter table {table_name}
-        on cluster {cfg.cluster}
-        delete where
-            `client` = {_clickhouse_string_literal(client)}
-        and
-            `segment` = {_clickhouse_string_literal(segment_name)}
-        settings mutations_sync = 1
-    """
-    logger.info("Deleting cached users from %s for client=%s, segment=%s", table_name, client, segment_name)
-    execute_sql_modify(query)
+    client_literal = _clickhouse_string_literal(client)
+    segment_literal = _clickhouse_string_literal(segment_name)
+    partition_pattern = f"%,{client_literal},{segment_literal})"
+    logger.info("Dropping cached user partitions from %s for client=%s, segment=%s", table_name, client, segment_name)
+    _drop_active_partitions(
+        table_name,
+        f"`partition` like {_clickhouse_string_literal(partition_pattern)}",
+        config=cfg,
+    )
 
 
 def delete_experiment_users_segment(
@@ -1959,14 +2106,16 @@ def _create_table_from_select(
 
 def _delete_subscriptions_block(table_name: str, block_start: datetime.date, block_end: datetime.date, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
     cfg = get_config(config)
-    query = f"""
-        alter table {table_name}
-        on cluster {cfg.cluster}
-        delete where toDate(`subscribed_dt`) between toDate('{block_start}') and toDate('{block_end}')
-        settings mutations_sync = 1
-    """
-    logger.info("Deleting subscriptions block from %s for %s - %s", table_name, block_start, block_end)
-    execute_sql_modify(query)
+    year_months = list(_iter_year_months(block_start, block_end))
+    if not year_months:
+        return
+
+    logger.info("Dropping subscriptions partitions from %s for %s - %s", table_name, block_start, block_end)
+    _drop_active_partitions(
+        table_name,
+        f"`partition` in ({', '.join(_clickhouse_string_literal(str(year_month)) for year_month in year_months)})",
+        config=cfg,
+    )
 
 
 def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
@@ -2092,6 +2241,8 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
     ):
         logger.info("Skipping subscription source tables update for %s: updated less than 1 hour ago", date_start)
         return
+
+    date_start, date_end = _month_date_range(date_start, date_end)
 
     for block_start, block_end in _iter_half_year_blocks(date_start, date_end):
         logger.info("Updating subscription source tables for %s - %s", block_start, block_end)
