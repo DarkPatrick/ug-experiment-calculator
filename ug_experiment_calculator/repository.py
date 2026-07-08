@@ -1131,8 +1131,37 @@ def app_product_sample_params(
 
 
 def _stable_config_hash(config: object) -> str:
-    config_json = json.dumps(config, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    config_json = json.dumps(_canonical_hash_value(config), sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
     return hashlib.sha256(config_json.encode("utf-8")).hexdigest()
+
+
+def _canonical_hash_value(value: object):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, datetime.datetime):
+        return value.isoformat()
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _canonical_hash_value(value[key])
+            for key in sorted(value.keys(), key=lambda item: str(item))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_hash_value(item) for item in value]
+    if isinstance(value, set):
+        normalized_items = [_canonical_hash_value(item) for item in value]
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str),
+        )
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _canonical_clients_options(clients_options: object):
+    return _canonical_hash_value(_parse_clients_options(clients_options))
 
 
 def _experiment_time_params(exp_info: dict) -> dict[str, int]:
@@ -1150,8 +1179,9 @@ def get_segment_hash(segment: dict, *, exp_info: Optional[dict] = None, client: 
 
 
 def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: object = "") -> str:
+    canonical_clients_options = _canonical_clients_options(clients_options)
     user_filter_segment = {
-        "query": exp_raw_data_query_name(client, segment, clients_options=clients_options),
+        "query": exp_raw_data_query_name(client, segment, clients_options=canonical_clients_options),
         "uwf": segment.get("uwf", "1"),
         "uhf": segment.get("uhf", "1"),
         "pro_rights": str(segment.get("pro_rights", "all")).lower(),
@@ -1164,20 +1194,46 @@ def get_user_filters_hash(segment: dict, *, client: str = "", clients_options: o
         "mobile_web": segment.get("mobile_web", False),
         "slice": segment.get("slice", ""),
     }
-    segment_json = json.dumps(user_filter_segment, sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=str)
+    segment_json = json.dumps(
+        _canonical_hash_value(user_filter_segment),
+        sort_keys=True,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        default=str,
+    )
     return hashlib.sha256(segment_json.encode("utf-8")).hexdigest()
 
 
+def _experiment_users_query_filters(exp_info: dict, segment: dict) -> tuple[str, str]:
+    exp_id = experiment_base_id(exp_info)
+    experiment_event_start = exp_info.get("experiment_event_start", "")
+    where_filter = segment.get("uwf", "1")
+    if experiment_event_start == "App Experiment Start":
+        where_filter += f" and (event = 'App Experiment Start' and item_id = {exp_id})"
+    elif experiment_event_start != "":
+        where_filter += f" and event = '{experiment_event_start}'"
+
+    having_filter = segment.get("uhf", "1")
+    pro_rights = generate_sql_rights_filter("pro", segment.get("pro_rights", "all").lower())
+    edu_rights = generate_sql_rights_filter("edu", segment.get("edu_rights", "all").lower())
+    sing_rights = generate_sql_rights_filter("edu", segment.get("sing_rights", "all").lower())
+    practice_rights = generate_sql_rights_filter("edu", segment.get("practice_rights", "all").lower())
+    book_rights = generate_sql_rights_filter("edu", segment.get("book_rights", "all").lower())
+    having_filter += f" and ({pro_rights} and {edu_rights} and {sing_rights} and {practice_rights} and {book_rights})"
+    return where_filter, having_filter
+
+
 def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) -> dict:
-    clients_options = exp_info.get("clients_options", "")
+    clients_options = _canonical_clients_options(exp_info.get("clients_options", ""))
+    where_filter, having_filter = _experiment_users_query_filters(exp_info, segment)
     return {
         "cache_version": EXPERIMENT_USERS_CACHE_VERSION,
-        "user_filters_hash": get_user_filters_hash(segment, client=client, clients_options=clients_options),
         "client": client,
-        "clients_options": clients_options,
+        "source_client": source_client_for_calculation(client),
+        "query": exp_raw_data_query_name(client, segment, clients_options=clients_options),
+        "where_sql": where_filter,
+        "having_sql": having_filter,
         "date_start": int(exp_info.get("date_start", 0) or 0),
-        "date_end": int(exp_info.get("date_end", 0) or 0),
-        "experiment_event_start": exp_info.get("experiment_event_start", ""),
     }
 
 
@@ -2398,19 +2454,7 @@ def create_experiment_users_table(
     source_client = source_client_for_calculation(client)
     is_web_client = base_client_for_calculation(client) == UG_WEB_CLIENT
     is_mobweb = is_web_client and is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
-
-    where_filter = segment.get("uwf", "1")
-    if exp_info["experiment_event_start"] == "App Experiment Start":
-        where_filter += f" and (event = 'App Experiment Start' and item_id = {exp_id})"
-    elif exp_info["experiment_event_start"] != "":
-        where_filter += f" and event = '{exp_info['experiment_event_start']}'"
-    having_filter = segment.get("uhf", "1")
-    pro_rights = generate_sql_rights_filter("pro", segment.get("pro_rights", "all").lower())
-    edu_rights = generate_sql_rights_filter("edu", segment.get("edu_rights", "all").lower())
-    sing_rights = generate_sql_rights_filter("edu", segment.get("sing_rights", "all").lower())
-    practice_rights = generate_sql_rights_filter("edu", segment.get("practice_rights", "all").lower())
-    book_rights = generate_sql_rights_filter("edu", segment.get("book_rights", "all").lower())
-    having_filter += f" and ({pro_rights} and {edu_rights} and {sing_rights} and {practice_rights} and {book_rights})"
+    where_filter, having_filter = _experiment_users_query_filters(exp_info, segment)
 
     is_exists = execute_sql(f"exists {full_table_name}")
     if int(is_exists.iloc[0].values[0]) == 0:

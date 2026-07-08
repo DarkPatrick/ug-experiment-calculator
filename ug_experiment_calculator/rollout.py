@@ -703,7 +703,6 @@ def get_rollout_split_users_hash(exp_info: dict, client: str) -> str:
         "exp_id": int(exp_info["id"]),
         "client": client,
         "source_client": source_client,
-        "clients_options": clients_options,
         "events_table": events_table,
         "platform_filter": platform_filter,
         "date_start": int(exp_info.get("date_start", 0) or 0),
