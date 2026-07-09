@@ -664,16 +664,19 @@ def build_rollout_impact_confluence_table_code(
         for client_index, client in enumerate(clients)
     ]
 
+    header_row_count = 2
     rows = []
     for row_index in range(table_height):
         cells = []
         for block_index, block in enumerate(blocks):
-            if block_index > 0 and row_index == 0:
-                cells.append(_design_separator_cell(table_height))
+            if block_index > 0:
+                separator = _design_separator_cell_for_row(row_index, header_row_count, table_height)
+                if separator is not None:
+                    cells.append(separator)
             cells.extend(block[row_index])
         rows.append(_row(cells))
 
-    return _rollout_impact_table(_table(rows, header_row_count=2))
+    return _rollout_impact_table(_table(rows, header_row_count=header_row_count))
 
 
 def _get_report_metric_table_code(
@@ -823,16 +826,19 @@ def build_design_confluence_table_code(
         return _table([])
 
     table_height = len(DESIGN_TABLE_COLUMNS) + 5
+    header_row_count = 3
     rows = []
     for row_index in range(table_height):
         cells = []
         for block_index, block in enumerate(blocks):
-            if block_index > 0 and row_index == 0:
-                cells.append(_design_separator_cell(table_height))
+            if block_index > 0:
+                separator = _design_separator_cell_for_row(row_index, header_row_count, table_height)
+                if separator is not None:
+                    cells.append(separator)
             cells.extend(block[row_index])
         rows.append(_row(cells))
 
-    return _table(rows, header_row_count=3)
+    return _table(rows, header_row_count=header_row_count)
 
 
 def _prepare_design_reality_experiment_rows(rows: pd.DataFrame | Iterable[Mapping[str, Any]]) -> pd.DataFrame:
@@ -2057,6 +2063,26 @@ def _design_separator_cell(rowspan: int) -> str:
         rowspan=rowspan,
         raw=True,
     )
+
+
+def _design_separator_cell_for_row(
+    row_index: int, header_row_count: int, table_height: int
+) -> str | None:
+    """Between-blocks divider cell for the given row, split at the ``<thead>``/``<tbody>``
+    boundary.
+
+    A single ``rowspan`` cell that starts in ``<thead>`` and extends into ``<tbody>`` is
+    clamped by HTML renderers at the section boundary — the divider column then collapses
+    in the body and the data cells shift left into it. To keep one continuous (same-colour)
+    divider that renders correctly, emit one cell spanning the header rows and a second
+    spanning the body rows, instead of a single full-height cell. When there is no header
+    split (``header_row_count == 0``) this is a single full-height cell as before.
+    """
+    if row_index == 0:
+        return _design_separator_cell(header_row_count or table_height)
+    if header_row_count and row_index == header_row_count:
+        return _design_separator_cell(table_height - header_row_count)
+    return None
 
 
 def _load_metric_table_configs(
