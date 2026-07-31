@@ -243,6 +243,22 @@ with
                     and length(arrayFilter(x -> x between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 86400, `sta`.`book_instant_offer_sub_dts`)) > 0
                 )
             ) as `is_trial2instant`,
+            toUInt8(
+                `sta`.`is_otp` = 0
+                and `sta`.`is_access_intro` = 0
+                and `sta`.`trial` >= 30
+                and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`))
+                and lower(`sta`.`platform`) like '%web%'
+            ) as `is_web_plan_change`,
+            toUInt8(
+                `sta`.`is_otp` = 0
+                and (
+                    `sta`.`duration_count` >= 12
+                    or lower(`sta`.`product_id`) like '%1year%'
+                    or lower(`sta`.`product_id`) like '%year%'
+                    or lower(`sta`.`service_name`) like '%year%'
+                )
+            ) as `is_annual_subscription`,
             coalesce(`tcm`.`conversion`, `toc`.`conversion`, 0) as `expected_trial_conversion`,
             ifNotFinite(
                 ifNull(`sta`.`base_price`, 0) * case
@@ -288,6 +304,7 @@ with
                 uniqIf(
                     (`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)),
                     `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800
+                    and `sta`.`is_web_plan_change` = 0
                     and `sta`.`is_otp` = 0
                 ) as `subscriptions_per_user_cnt`
             from
@@ -320,6 +337,36 @@ with
                     `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800
                     and `sta`.`is_access_intro` = 1
                 ) as `intros_per_user_cnt`
+            from
+                `exp_users` as `eut`
+            left join
+                `subscription_matches_with_expected` as `sta`
+            on
+                `eut`.`unified_id` = `sta`.`exp_unified_id`
+            group by
+                `dt`,
+                `variation`,
+                `unified_id`
+        )
+        group by
+            `dt`,
+            `variation`
+    ),
+    `plan_changes_per_user` as (
+        select
+            `dt`,
+            `variation`,
+            ifNotFinite(ifNull(varSamp(`plan_changes_per_user_cnt`), 0), 0) as `plan_changes_per_user_var`
+        from (
+            select
+                toDate(`eut`.`exp_start_dt`) as `dt`,
+                `eut`.`variation` as `variation`,
+                `eut`.`unified_id` as `unified_id`,
+                uniqIf(
+                    (`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)),
+                    `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800
+                    and `sta`.`is_web_plan_change` = 1
+                ) as `plan_changes_per_user_cnt`
             from
                 `exp_users` as `eut`
             left join
@@ -378,25 +425,29 @@ select
     uniq(`eut`.`unified_id`) as `members`,
     uniqIf(`eut`.`unified_id`, `eut`.`payment_account_id` > 0) as `install_cnt`,
     uniqIf(`eut`.`unified_id`, `eut`.`app_unified_id` > 0) as `app_referral_tour_cnt`,
-    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_otp` = 0) as `subscriber_cnt`,
+    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0) as `subscriber_cnt`,
     uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_otp` = 1) as `otp_owner_cnt`,
-    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800) as `access_owner_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`) and `sta`.`trial` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_instant_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_ex_trial_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_trial_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_access_intro` = 1) as `access_intro_cnt`,
-    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `trial_subscriber_cnt`,
+    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 0) as `access_owner_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`) and `sta`.`trial` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_instant_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`) and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_ex_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `access_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 1) as `access_plan_change_cnt`,
+    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 1) as `plan_change_user_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_annual_subscription` = 1) as `annual_subscription_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_access_intro` = 1) as `access_intro_cnt`,
+    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `trial_subscriber_cnt`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`first_charge_expected_dt` > `eut`.`exp_start_dt` and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0 and (`sta`.`charge_dt` = 0 or `sta`.`charge_dt` > `eut`.`exp_start_dt`)) as `active_trial_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`cancel_dt` < `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` > toUnixTimestamp(now()) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `pending_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`cancel_dt` < `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` > toUnixTimestamp(now()) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `pending_trial_cnt`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`is_otp` = 1) as `access_otp_cnt`,
     `access_instant_cnt` + `access_ex_trial_cnt` + `access_trial_cnt` + `access_intro_cnt` as `subscriptions_cnt`,
     any(`spu`.`subscriptions_per_user_var`) as `subscriptions_per_user_var`,
     any(`ipu`.`intros_per_user_var`) as `intros_per_user_var`,
+    any(`pcu`.`plan_changes_per_user_var`) as `plan_changes_per_user_var`,
     `subscriptions_cnt` + `access_otp_cnt` as `access_cnt`,
 
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `charged_trial_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `expected_trial_cnt`,
-    coalesce(sumIf(`sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_charged_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `charged_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `expected_trial_cnt`,
+    coalesce(sumIf(`sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_charged_trial_cnt`,
     uniqIf(
         (`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)),
         `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`))
@@ -404,11 +455,12 @@ select
             `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400
             or `sta`.`has_pro_instant_offer` > 0 and lower(`sta`.`service_name`) like '%pro%' and length(arrayFilter(x -> x between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 86400, `sta`.`pro_instant_offer_sub_dts`)) > 0
             or `sta`.`has_book_instant_offer` > 0 and lower(`sta`.`service_name`) like '%book%' and length(arrayFilter(x -> x between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 86400, `sta`.`book_instant_offer_sub_dts`)) > 0
-        ) and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0
+        ) and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0
     ) as `any_charged_trial_cnt`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `active_charged_trial_cnt`,
-    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and `sta`.`charge_dt` = 0 and `sta`.`cancel_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `cancel_trial_cnt`,
-    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `trial_buyer_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`charge_dt` = 0 and `sta`.`cancel_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `cancel_trial_cnt`,
+    uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_trial2instant` = 0 and `sta`.`charge_dt` = 0 and `sta`.`cancel_dt` between `sta`.`subscribed_dt` and `sta`.`subscribed_dt` + 3600 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `quick_cancel_trial_cnt`,
+    uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0) as `trial_buyer_cnt`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` > `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0) as `late_charged_cnt`,
     uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0) as `subscribe_buyer_cnt`,
     uniqIf(`eut`.`unified_id`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400) as `buyer_cnt`,
@@ -419,13 +471,13 @@ select
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`charge_dt` > toUnixTimestamp(now()) - 1209600) as `pending_14d_charge_cnt`,
     coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400), 0)
         - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600), 0) as `revenue`,
-    coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
-        - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
-        + coalesce(sumIf(`sta`.`expected_trial_net_price` * `sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_revenue`,
+    coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
+        - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600 and not (`sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0)), 0)
+        + coalesce(sumIf(`sta`.`expected_trial_net_price` * `sta`.`expected_trial_conversion`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_trial2instant` = 0 and `sta`.`is_web_plan_change` = 0 and `sta`.`is_otp` = 0 and `sta`.`is_access_intro` = 0), 0) as `expected_revenue`,
     coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`refund_dt` between `sta`.`charge_dt` and `sta`.`charge_dt` + 1209600), 0) as `refund_revenue`,
     uniqIf((`sta`.`subscription_id`, `sta`.`product_id`, toDate(`sta`.`subscribed_dt`)), `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`charge_dt` >= `sta`.`subscribed_dt`) as `recurrent_charge_cnt`,
     coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`charge_dt` >= `sta`.`subscribed_dt`), 0) as `recurrent_revenue`,
-    coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0), 0) as `trial_revenue`,
+    coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` between `eut`.`exp_start_dt` and `eut`.`exp_start_dt` + 604800 and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`is_web_plan_change` = 0 and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0), 0) as `trial_revenue`,
     coalesce(sumIf(`sta`.`revenue`, `sta`.`subscribed_dt` < `eut`.`exp_start_dt` and `sta`.`trial` > 0 and not (toDate(`sta`.`charge_dt`) = toDate(`sta`.`subscribed_dt`)) and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0), 0) as `active_trial_revenue`,
     coalesce(sumIf(`sta`.`lifetime_revenue`, `sta`.`subscribed_dt` >= `eut`.`exp_start_dt` and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0), 0)
         - coalesce(sumIf(`sta`.`refund_revenue`, `sta`.`subscribed_dt` >= `eut`.`exp_start_dt` and `sta`.`charge_dt` between `sta`.`subscribed_dt` and `sta`.`first_charge_expected_dt` + 86400 and `sta`.`is_otp` = 0 and `sta`.`refund_dt` >= `sta`.`charge_dt`), 0) as `lifetime_revenue`,
@@ -454,6 +506,12 @@ on
     toDate(`eut`.`exp_start_dt`) = `ipu`.`dt`
 and
     `eut`.`variation` = `ipu`.`variation`
+left join
+    `plan_changes_per_user` as `pcu`
+on
+    toDate(`eut`.`exp_start_dt`) = `pcu`.`dt`
+and
+    `eut`.`variation` = `pcu`.`variation`
 left join
     `charges_per_user` as `cpu`
 on

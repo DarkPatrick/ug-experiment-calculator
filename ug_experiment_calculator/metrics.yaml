@@ -180,6 +180,57 @@ trials share, %:
   - positive: 1
   - suffix: "%"
 
+annual subscriptions share, %:
+  - domain: "monetization"
+  - numerator: annual_subscription_cnt
+  - denominator: subscriptions_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of annual subscriptions among subscriptions"
+  - table_position: 12
+  - positive: 1
+  - suffix: "%"
+
+cheapskaters, %:
+  - domain: "monetization"
+  - numerator: quick_cancel_trial_cnt
+  - denominator: access_trial_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - platforms: ["all"]
+  - description: "share of trial subscriptions cancelled within 1 hour, excluding trial-to-instant-offer cases"
+  - table_position: 13
+  - positive: 0
+  - suffix: "%"
+
+plan changes per user:
+  - domain: "monetization"
+  - numerator: access_plan_change_cnt
+  - denominator: members
+  - percentage: false
+  - variance: plan_changes_per_user_var
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "average number of web plan-change subscriptions per user"
+  - table_position: 14
+  - positive: 1
+
+members -> plan changes, %:
+  - domain: "monetization"
+  - numerator: plan_change_user_cnt
+  - denominator: members
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB"]
+  - platforms: ["all"]
+  - description: "share of web users who changed plan"
+  - table_position: 15
+  - positive: 1
+  - suffix: "%"
+
 trial -> charge, %:
   - domain: "monetization"
   - numerator: charged_trial_cnt

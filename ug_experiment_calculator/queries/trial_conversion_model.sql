@@ -109,6 +109,12 @@ with
             `src`.`is_access_intro` = 0
         and
             not (toDate(`src`.`charge_dt`) = toDate(`src`.`subscribed_dt`))
+        -- IMPORTANT: replace with better condition if we get real long trials
+        and
+            not (
+                `src`.`trial` >= 30
+                and lower(`src`.`platform`) like '%web%'
+            )
     ),
     `cohorts` as (
         select
