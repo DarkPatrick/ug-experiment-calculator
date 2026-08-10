@@ -87,6 +87,7 @@ calculate_exp_info(123456, config=config)
 | `EXPERIMENT_FUNNELS_YAML_PATH` | `ug_experiment_calculator/funnels.yaml` | Путь к конфигу воронок. |
 | `EXPERIMENT_DEFAULT_CLIENTS` | `UGT_IOS,UGT_ANDROID,UG_WEB` | Платформы, если в эксперименте не указан список клиентов. |
 | `EXPERIMENT_UPDATE_SUBSCRIPTION_SOURCES` | `false` | Обновлять ли кэши `subscriptions` и `subscriptions_transactions` перед расчетом. |
+| `EXPERIMENT_MOBWEB_PRODUCT_METRICS_SAMPLE_RATE` | `0.2` | Доля mobweb users для тяжелых app product-метрик после mobweb -> app перехода. |
 
 `table_prefix` применяется к физическому имени таблицы. Например, логическая таблица `ug_exp_results` при `table_prefix="dev_"` станет `sandbox.dev_ug_exp_results`.
 
@@ -123,6 +124,10 @@ calculate_exp_info(123456, config=config)
 | `subscriptions_transactions` | Кэш транзакций подписок, обновляется блоками по полгода. |
 | `exp_users_{exp_launch_id}` | Пользователи launch-окна эксперимента с `client`, `segment`, `segment_hash`. |
 | `exp_subscription_{exp_launch_id}_{session_id}` | Временная таблица подписок для одного запуска расчета. |
+
+`subscriptions` хранит атрибуты подписки по `subscribed_dt`. `subscriptions_transactions` хранит события после оформления подписки, включая `charge_dt`, `cancel_dt`, `refund_dt`, `upgrade_dt` и массивы charge-событий. Эти поля добавляются к подписке только во временной таблице `exp_subscription_{exp_launch_id}_{session_id}` через SQL-шаблон `subscriptions_joined_by_sub_date.sql`.
+
+Инкрементальное обновление source-кэшей берет последнюю доступную `subscribed_dt` в кэшах, отматывает старт на 45 дней назад, округляет диапазон до границ месяцев и перечитывает эти партиции. Этот lookback нужен, чтобы триалы, оформленные в конце предыдущего месяца и списавшиеся в новом месяце, получили актуальный `charge_dt` в `subscriptions_transactions`.
 
 `exp_users_{exp_launch_id}` переиспользуется между запусками. `segment_hash` считается по фильтрам сегмента и контексту набора пользователей: `client`, `clients_options`, `experiment_event_start`, `date_start`, `date_end`. Если этот хэш изменился, строки сегмента удаляются и собираются заново. Для client-ов, удаленных во время активного launch-а, `date_end` берется из истории изменения клиента, поэтому users после удаления не добираются, а уже набранный сегмент продолжает участвовать в итоговых расчетах.
 
@@ -775,6 +780,8 @@ from ug_experiment_calculator import (
 
 - `update_subscription_source_tables()` - обновить кэши подписок.
 - `update_trial_conversion_model()` - обновить дневную таблицу `trial_conversion_model` с expected trial-to-charge conversion по `(platform, tier, base_price_int)`; при `EXPERIMENT_CH_TABLE_PREFIX` физическое имя получает тот же префикс.
+- `create_experiments_subscription_table(exp_info, client, segment, ...)` - создать временную joined-таблицу подписок для одного расчета; именно эту таблицу нужно передавать в низкоуровневые subscription/monetization SQL.
+- `get_monetization_metrics(..., subscription_table, ...)` - низкоуровневый helper, ожидающий `subscription_table` из `create_experiments_subscription_table`; raw `subscriptions` не подходит, потому что в ней нет `charge_dt`.
 - `drop_exp_partitions(...)` - удалить партиции конкретного `exp_id/client/segment` из результирующей таблицы.
 - `clear_exp_temp_tables()` - удалить временные таблицы, найденные SQL-шаблоном `get_sloperator_temp_tables.sql`.
 - `drop_table(table_name)` - удалить таблицу на кластере.
