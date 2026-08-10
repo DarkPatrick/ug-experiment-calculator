@@ -30,7 +30,8 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 9
+SUBSCRIPTION_SOURCE_VERSION = 10
+SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
 EXPERIMENT_USERS_CACHE_VERSION = 6
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
@@ -1817,6 +1818,17 @@ def _get_table_max_subscribed_date(table_name: str, *, config: Optional[Experime
     return max_dt
 
 
+def _subscription_source_incremental_start_date(
+    dates: Iterable[datetime.date],
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> datetime.date:
+    cfg = get_config(config)
+    max_source_date = min(dates, default=cfg.subscriptions_start_date)
+    date_start = max_source_date - datetime.timedelta(days=SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS)
+    return max(date_start, cfg.subscriptions_start_date)
+
+
 def _table_has_column(table_name: str, column_name: str) -> bool:
     database, short_table_name = table_name.split(".", 1)
     query = f"""
@@ -2300,6 +2312,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
             {
                 "date_start": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
                 "date_end": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
+                "source_version": SUBSCRIPTION_SOURCE_VERSION,
             },
             "toYYYYMM(toDate(subscribed_dt))",
             "subscribed_dt, subscription_id, product_code",
@@ -2323,6 +2336,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
                 "date_start": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
                 "date_end": cfg.subscriptions_start_date.strftime("%Y-%m-%d"),
                 "subscriptions_table": cfg.subscriptions_table,
+                "source_version": SUBSCRIPTION_SOURCE_VERSION,
             },
             "toYYYYMM(toDate(subscribed_dt))",
             "subscribed_dt, subscription_id, product_code",
@@ -2397,7 +2411,11 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
     subscriptions_max_dt = _get_table_max_subscribed_date(cfg.subscriptions_table, config=cfg)
     transactions_max_dt = _get_table_max_subscribed_date(cfg.subscription_transactions_table, config=cfg)
     dates = [dt for dt in [subscriptions_max_dt, transactions_max_dt] if dt is not None]
-    date_start = cfg.subscriptions_start_date if needs_full_refresh else min(dates) if dates else cfg.subscriptions_start_date
+    date_start = (
+        cfg.subscriptions_start_date
+        if needs_full_refresh
+        else _subscription_source_incremental_start_date(dates, config=cfg)
+    )
     date_end = datetime.datetime.now(datetime.timezone.utc).date()
 
     if date_start > date_end:
@@ -2425,6 +2443,7 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
             {
                 "date_start": block_start.strftime("%Y-%m-%d"),
                 "date_end": block_end.strftime("%Y-%m-%d"),
+                "source_version": SUBSCRIPTION_SOURCE_VERSION,
             },
             config=cfg,
         )
@@ -2436,6 +2455,7 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
                 "date_start": block_start.strftime("%Y-%m-%d"),
                 "date_end": block_end.strftime("%Y-%m-%d"),
                 "subscriptions_table": cfg.subscriptions_table,
+                "source_version": SUBSCRIPTION_SOURCE_VERSION,
             },
             config=cfg,
         )

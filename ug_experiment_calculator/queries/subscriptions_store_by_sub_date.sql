@@ -23,7 +23,7 @@ select
     `is_access_intro`,
     `is_otp`,
     now() as `updated_at`,
-    toUInt16(9) as `source_version`
+    toUInt16({source_version}) as `source_version`
 from (
     select
         `subscription_id`,
