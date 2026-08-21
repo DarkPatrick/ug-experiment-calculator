@@ -444,7 +444,7 @@ def parse_configuration_project(row) -> str:
     text = str(row)
     project = ""
 
-    match_project = re.search(r'project:\s*"?([^",\s]+)"?', text)
+    match_project = re.search(r'project:\s*"?([^",\s]+)"?', text, flags=re.IGNORECASE)
     if match_project:
         project = match_project.group(1)
     else:
