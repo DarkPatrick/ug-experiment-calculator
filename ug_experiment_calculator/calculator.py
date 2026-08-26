@@ -638,6 +638,7 @@ def calculate_exp_info(
             )
 
         if is_bandit_exp_info(exp_info):
+            _resolve_bandit_admin_experiment(exp_info, config=cfg)
             _record_bandit_reconciliation(exp_info, df_tot, config=cfg)
 
         if update_rollout and exp_info.get("is_latest_launch", True) and not is_bandit_exp_info(exp_info):
@@ -646,6 +647,21 @@ def calculate_exp_info(
             logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"
+
+
+def _resolve_bandit_admin_experiment(exp_info: dict, *, config: ExperimentCalculatorConfig) -> None:
+    from .bandit import resolve_bandit_admin_experiment
+
+    try:
+        admin_exp_id = resolve_bandit_admin_experiment(exp_info, config=config)
+    except Exception:
+        logger.exception("Admin wrapper resolution failed for %s", exp_info.get("aix_experiment_id"))
+        return
+    if admin_exp_id is None:
+        logger.warning(
+            "Admin wrapper experiment not resolved for %s; the two-read report will need an explicit admin_exp_id",
+            exp_info.get("aix_experiment_id"),
+        )
 
 
 def _record_bandit_reconciliation(

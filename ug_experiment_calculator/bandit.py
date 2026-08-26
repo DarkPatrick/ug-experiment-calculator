@@ -53,6 +53,11 @@ UG_PROD_ORIGIN_HOST = "www.ultimate-guitar.com"
 # Mirror of the classic to-calc semantics (status = 1 OR ended within 30 days).
 DEFAULT_BANDIT_ENDED_LOOKBACK_DAYS = 30
 AIX_API_TIMEOUT_SECONDS = 90
+# Empirical admin-wrapper resolution thresholds: the wrapper covers ~all
+# participants, and its holdout (variation 1) is depleted among them because
+# holdout users never receive aix content and never fire the participate event.
+BANDIT_ADMIN_COVERAGE_MIN = 0.95
+BANDIT_ADMIN_HOLDOUT_SHARE_MAX = 0.002
 # Result-table partitions are keyed by Int64 exp_id; launch windows already use
 # -(exp_id * 1000 + launch_number), so bandit ids live in their own range below it.
 BANDIT_OUTPUT_EXP_ID_BASE = -1_000_000_000
@@ -120,6 +125,7 @@ def _ensure_bandit_experiments_table(*, config: ExperimentCalculatorConfig) -> s
             `aix_experiment_id` String,
             `output_exp_id` Int64,
             `entry_event` String,
+            `admin_exp_id` Int64,
             `updated_at` DateTime
         )
         """
@@ -132,6 +138,15 @@ def _ensure_bandit_experiments_table(*, config: ExperimentCalculatorConfig) -> s
                 config=config,
             )
         )
+        return full_table_name
+
+    execute_sql_modify(
+        f"""
+        alter table {full_table_name}
+        on cluster {config.cluster}
+        add column if not exists `admin_exp_id` Int64 default 0 after `entry_event`
+        """
+    )
     return full_table_name
 
 
@@ -198,22 +213,56 @@ def _utc_now_naive() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
 
 
-def ensure_bandit_output_exp_id(aix_experiment_id: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> int:
+def _write_bandit_registry_row(
+    full_table_name: str,
+    aix_experiment_id: str,
+    output_exp_id: int,
+    admin_exp_id: int,
+) -> None:
+    row = pd.DataFrame(
+        [
+            {
+                "aix_experiment_id": str(aix_experiment_id),
+                "output_exp_id": int(output_exp_id),
+                "entry_event": BANDIT_ENTRY_EVENT,
+                "admin_exp_id": int(admin_exp_id),
+                "updated_at": _utc_now_naive(),
+            }
+        ]
+    )
+    row["output_exp_id"] = row["output_exp_id"].astype("int64")
+    row["admin_exp_id"] = row["admin_exp_id"].astype("int64")
+    row["updated_at"] = pd.to_datetime(row["updated_at"]).astype("datetime64[ns]")
+    insert_dataframe(full_table_name, row)
+
+
+def get_bandit_registry_row(aix_experiment_id: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> Optional[dict]:
     cfg = get_config(config)
     full_table_name = _ensure_bandit_experiments_table(config=cfg)
-    slug_literal = _clickhouse_string_literal(str(aix_experiment_id))
-
     existing_df = execute_sql(
         f"""
         select
-            `output_exp_id`
+            `output_exp_id`,
+            `admin_exp_id`
         from {full_table_name} final
         where
-            `aix_experiment_id` = {slug_literal}
+            `aix_experiment_id` = {_clickhouse_string_literal(str(aix_experiment_id))}
         """
     )
-    if not existing_df.empty:
-        return int(existing_df["output_exp_id"].iloc[0])
+    if existing_df.empty:
+        return None
+    return {
+        "output_exp_id": int(existing_df["output_exp_id"].iloc[0]),
+        "admin_exp_id": int(existing_df["admin_exp_id"].iloc[0] or 0),
+    }
+
+
+def ensure_bandit_output_exp_id(aix_experiment_id: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> int:
+    cfg = get_config(config)
+    full_table_name = _ensure_bandit_experiments_table(config=cfg)
+    registry_row = get_bandit_registry_row(aix_experiment_id, config=cfg)
+    if registry_row is not None:
+        return int(registry_row["output_exp_id"])
 
     min_df = execute_sql(
         f"""
@@ -229,19 +278,7 @@ def ensure_bandit_output_exp_id(aix_experiment_id: str, *, config: Optional[Expe
     else:
         output_exp_id = min(int(min_df["min_output_exp_id"].iloc[0]), BANDIT_OUTPUT_EXP_ID_BASE) - 1
 
-    row = pd.DataFrame(
-        [
-            {
-                "aix_experiment_id": str(aix_experiment_id),
-                "output_exp_id": int(output_exp_id),
-                "entry_event": BANDIT_ENTRY_EVENT,
-                "updated_at": _utc_now_naive(),
-            }
-        ]
-    )
-    row["output_exp_id"] = row["output_exp_id"].astype("int64")
-    row["updated_at"] = pd.to_datetime(row["updated_at"]).astype("datetime64[ns]")
-    insert_dataframe(full_table_name, row)
+    _write_bandit_registry_row(full_table_name, str(aix_experiment_id), output_exp_id, 0)
     logger.info("Registered bandit experiment %s with output_exp_id=%s", aix_experiment_id, output_exp_id)
     return int(output_exp_id)
 
@@ -841,3 +878,169 @@ def get_bandit_exps_list(
     if experiments_df.empty:
         return []
     return [str(slug) for slug in experiments_df["aix_experiment_id"].tolist()]
+
+
+def _window_overlap_share(
+    slug_start: int,
+    slug_end: int,
+    admin_start: int,
+    admin_end: int,
+) -> float:
+    """Share of the slug window covered by the admin experiment's registry window."""
+    if slug_end <= slug_start:
+        return 0.0
+    effective_admin_end = admin_end if admin_end > 0 else slug_end
+    overlap = min(slug_end, effective_admin_end) - max(slug_start, admin_start)
+    return max(0.0, overlap / (slug_end - slug_start))
+
+
+def select_bandit_admin_experiment(
+    candidates: list[dict],
+    *,
+    coverage_min: float = BANDIT_ADMIN_COVERAGE_MIN,
+    holdout_share_max: float = BANDIT_ADMIN_HOLDOUT_SHARE_MAX,
+) -> Optional[int]:
+    """Pick the admin wrapper from empirical candidates.
+
+    The wrapper is the admin experiment that covers ~all participants while its
+    holdout (variation 1) is depleted among them. Each candidate dict carries
+    ``admin_exp_id``, ``coverage_share``, ``holdout_share`` and optionally
+    ``window_overlap_share`` (used as a tie-breaker, not a hard filter, because
+    the admin registry window reflects only the latest launch).
+    """
+    passing = [
+        candidate
+        for candidate in candidates
+        if float(candidate.get("coverage_share", 0)) >= coverage_min
+        and float(candidate.get("holdout_share", 1)) <= holdout_share_max
+    ]
+    if not passing:
+        return None
+
+    passing.sort(
+        key=lambda candidate: (
+            float(candidate.get("holdout_share", 1)),
+            -float(candidate.get("window_overlap_share", 0)),
+            -float(candidate.get("coverage_share", 0)),
+        )
+    )
+    if len(passing) > 1:
+        logger.warning(
+            "Ambiguous admin wrapper candidates %s; picking %s",
+            [int(candidate["admin_exp_id"]) for candidate in passing],
+            int(passing[0]["admin_exp_id"]),
+        )
+    return int(passing[0]["admin_exp_id"])
+
+
+def _config_declared_admin_exp_id(aix_experiment_id: str) -> Optional[int]:
+    """An admin experiment whose Configuration names the slug wins outright."""
+    df = execute_sql(
+        f"""
+        select
+            `aex`.`id` as `admin_exp_id`
+        from
+            `mysql_u_guitarcom`.`ab_experiment` as `aex`
+        where
+            positionCaseInsensitive(`aex`.`configuration`, {_clickhouse_string_literal(str(aix_experiment_id))}) > 0
+        order by
+            `admin_exp_id`
+        """
+    )
+    if df.empty:
+        return None
+    if len(df) > 1:
+        logger.warning(
+            "aix slug %s is declared in several admin configurations: %s; ignoring the declaration",
+            aix_experiment_id,
+            df["admin_exp_id"].tolist(),
+        )
+        return None
+    return int(df["admin_exp_id"].iloc[0])
+
+
+def _admin_experiment_windows(admin_exp_ids: list[int]) -> dict[int, tuple[int, int]]:
+    if not admin_exp_ids:
+        return {}
+    ids_sql = ", ".join(str(int(exp_id)) for exp_id in admin_exp_ids)
+    df = execute_sql(
+        f"""
+        select
+            `aex`.`id` as `admin_exp_id`,
+            `aex`.`date_start` as `admin_date_start`,
+            `aex`.`date_end` as `admin_date_end`
+        from
+            `mysql_u_guitarcom`.`ab_experiment` as `aex`
+        where
+            `aex`.`id` in ({ids_sql})
+        """
+    )
+    return {
+        int(row.admin_exp_id): (int(row.admin_date_start or 0), int(row.admin_date_end or 0))
+        for row in df.itertuples(index=False)
+    }
+
+
+def resolve_bandit_admin_experiment(
+    exp_info: dict,
+    *,
+    force: bool = False,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> Optional[int]:
+    """Resolve the admin wrapper experiment id for a bandit slug.
+
+    Priority: the cached link in ``ug_exp_bandit_experiments`` -> an admin
+    Configuration that names the slug -> the empirical read from participate
+    events (full coverage + depleted holdout, window overlap as tie-breaker).
+    A successful resolution is cached in the registry.
+    """
+    from .repository import get_query
+
+    cfg = get_config(config)
+    slug = str(exp_info["aix_experiment_id"])
+    full_table_name = _ensure_bandit_experiments_table(config=cfg)
+
+    registry_row = get_bandit_registry_row(slug, config=cfg)
+    if registry_row is not None and registry_row["admin_exp_id"] and not force:
+        return int(registry_row["admin_exp_id"])
+
+    admin_exp_id = _config_declared_admin_exp_id(slug)
+    resolution_source = "admin configuration"
+
+    if admin_exp_id is None:
+        candidates_df = execute_sql(
+            get_query(
+                "bandit_admin_wrapper_candidates",
+                params={
+                    "entry_event": BANDIT_ENTRY_EVENT,
+                    "aix_experiment_id_sql": _clickhouse_string_literal(slug),
+                    "exp_start_ts": int(exp_info.get("date_start", 0) or 0),
+                    "exp_end_ts": int(exp_info.get("date_end", 0) or 0),
+                },
+                config=cfg,
+            )
+        )
+        candidates = candidates_df.to_dict("records") if not candidates_df.empty else []
+        if candidates:
+            windows = _admin_experiment_windows([int(candidate["admin_exp_id"]) for candidate in candidates])
+            slug_start = int(exp_info.get("date_start", 0) or 0)
+            date_end_ts = int(exp_info.get("date_end", 0) or 0)
+            slug_end = date_end_ts if date_end_ts > slug_start else int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            for candidate in candidates:
+                admin_start, admin_end = windows.get(int(candidate["admin_exp_id"]), (0, 0))
+                candidate["window_overlap_share"] = _window_overlap_share(slug_start, slug_end, admin_start, admin_end)
+        admin_exp_id = select_bandit_admin_experiment(candidates)
+        resolution_source = "participate events (coverage + depleted holdout)"
+
+    if admin_exp_id is None:
+        logger.warning("Could not resolve the admin wrapper experiment for %s", slug)
+        return None
+
+    output_exp_id = (
+        int(registry_row["output_exp_id"])
+        if registry_row is not None
+        else ensure_bandit_output_exp_id(slug, config=cfg)
+    )
+    _write_bandit_registry_row(full_table_name, slug, output_exp_id, int(admin_exp_id))
+    logger.info("Resolved admin wrapper for %s: %s (via %s)", slug, admin_exp_id, resolution_source)
+    return int(admin_exp_id)

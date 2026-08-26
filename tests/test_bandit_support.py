@@ -9,6 +9,7 @@ from ug_experiment_calculator.bandit import (
     assign_arm_variations,
     filter_bandit_experiments,
     is_bandit_experiment_id,
+    select_bandit_admin_experiment,
 )
 from ug_experiment_calculator.bandit_report import build_bandit_arm_confluence_table_code
 from ug_experiment_calculator.config import ExperimentCalculatorConfig
@@ -150,6 +151,35 @@ class BanditDiscoveryFilterTests(unittest.TestCase):
         )
         slugs = set(result["aix_experiment_id"])
         self.assertEqual(slugs, {"ug_active"})
+
+
+class AdminWrapperSelectionTests(unittest.TestCase):
+    # Real candidate table observed for ug_seasons_sale_banner_iter_4:
+    # 7832 is the wrapper (full coverage, holdout depleted), 7808 is an
+    # unrelated near-full-coverage experiment with a small variation-1 share.
+    ITER_4_CANDIDATES = [
+        {"admin_exp_id": 7832, "coverage_share": 1.0, "holdout_share": 0.0, "window_overlap_share": 1.0},
+        {"admin_exp_id": 7808, "coverage_share": 0.99876, "holdout_share": 0.004514, "window_overlap_share": 0.02},
+        {"admin_exp_id": 7886, "coverage_share": 0.500003, "holdout_share": 0.499237, "window_overlap_share": 1.0},
+        {"admin_exp_id": 7910, "coverage_share": 1.0, "holdout_share": 0.4993, "window_overlap_share": 1.0},
+    ]
+
+    def test_wrapper_selected_from_real_candidates(self) -> None:
+        self.assertEqual(select_bandit_admin_experiment(self.ITER_4_CANDIDATES), 7832)
+
+    def test_no_candidate_when_nothing_passes(self) -> None:
+        candidates = [
+            {"admin_exp_id": 7910, "coverage_share": 1.0, "holdout_share": 0.4993},
+            {"admin_exp_id": 7886, "coverage_share": 0.5, "holdout_share": 0.499},
+        ]
+        self.assertIsNone(select_bandit_admin_experiment(candidates))
+
+    def test_ambiguity_resolved_by_window_overlap(self) -> None:
+        candidates = [
+            {"admin_exp_id": 101, "coverage_share": 1.0, "holdout_share": 0.0, "window_overlap_share": 0.1},
+            {"admin_exp_id": 102, "coverage_share": 1.0, "holdout_share": 0.0, "window_overlap_share": 0.9},
+        ]
+        self.assertEqual(select_bandit_admin_experiment(candidates), 102)
 
 
 class BanditMetricConfigTests(unittest.TestCase):

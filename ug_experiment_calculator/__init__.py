@@ -66,6 +66,8 @@ _EXPORTS = {
     "get_bandit_reconciliation": ("bandit", "get_bandit_reconciliation"),
     "is_bandit_experiment_id": ("bandit", "is_bandit_experiment_id"),
     "reconcile_bandit_experiment": ("bandit", "reconcile_bandit_experiment"),
+    "resolve_bandit_admin_experiment": ("bandit", "resolve_bandit_admin_experiment"),
+    "select_bandit_admin_experiment": ("bandit", "select_bandit_admin_experiment"),
     "get_experiment": ("repository", "get_experiment"),
     "get_experiment_confluence_report_code": ("confluence_tables", "get_experiment_confluence_report_code"),
     "get_experiment_confluence_table_code": ("confluence_tables", "get_experiment_confluence_table_code"),

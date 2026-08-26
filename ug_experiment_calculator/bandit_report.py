@@ -347,13 +347,18 @@ def get_bandit_experiment_confluence_report_code(
     table with p-values suppressed by design, plus the recorded aix
     reconciliation.
     """
-    from .bandit import get_bandit_arm_registry, get_bandit_reconciliation
+    from .bandit import get_bandit_arm_registry, get_bandit_reconciliation, resolve_bandit_admin_experiment
     from .repository import UG_WEB_BANDIT_CLIENT, get_experiment, experiment_output_exp_id
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(bandit_exp_id, config=cfg)
     slug = str(exp_info["aix_experiment_id"])
     output_exp_id = experiment_output_exp_id(exp_info)
+
+    admin_exp_id_resolved = False
+    if admin_exp_id is None:
+        admin_exp_id = resolve_bandit_admin_experiment(exp_info, config=cfg)
+        admin_exp_id_resolved = admin_exp_id is not None
 
     arms_rows = get_bandit_arm_registry(slug, config=cfg)
     reconciliation_rows = get_bandit_reconciliation(slug, config=cfg)
@@ -375,6 +380,9 @@ def get_bandit_experiment_confluence_report_code(
     blocks.append(_paragraph(_strong_text("aix experiment: ") + escape(slug)))
     blocks.append(_paragraph(_strong_text("Window: ") + escape(f"{date_start.isoformat()} — {date_end_text}")))
     blocks.append(_paragraph(_strong_text("Cohort entry: ") + escape(str(exp_info.get("experiment_event_start") or ""))))
+    if admin_exp_id is not None:
+        admin_note = f"#{int(admin_exp_id)}" + (" (auto-resolved)" if admin_exp_id_resolved else "")
+        blocks.append(_paragraph(_strong_text("Admin wrapper experiment: ") + escape(admin_note)))
 
     blocks.append(_heading(2, "Read 1 — Admin A/B holdout (significance)"))
     if admin_exp_id is not None:

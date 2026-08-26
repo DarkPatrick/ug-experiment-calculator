@@ -842,6 +842,8 @@ for slug in get_bandit_exps_list():
 
 `get_bandit_experiments()` возвращает тот же список с деталями (status, origin, product_id, created_at, closed_at).
 
+**Автоопределение admin-обертки.** Связку "слаг <-> admin-эксперимент с holdout" (например `ug_seasons_sale_banner_iter_4` <-> 7832) определяет `resolve_bandit_admin_experiment(exp_info)`, приоритеты: (1) закэшированная связка в `ug_exp_bandit_experiments` (колонка `admin_exp_id`), (2) admin-эксперимент, чья `Configuration` упоминает слаг (ручной override - просто впишите слаг в конфигурацию обертки), (3) эмпирика из participate-событий: обертка - это admin-эксперимент, который покрывает ~100% партиципантов и чья вариация 1 (holdout) среди них выедена (holdout не получает aix-контент и participate не шлет; пороги: coverage >= 0.95, доля вариации 1 <= 0.2%, tie-break - перекрытие окон). Успешный резолв кэшируется в реестре; `calculate_exp_info` по слагу резолвит связку автоматически, а `get_bandit_experiment_confluence_report_code(slug)` без `admin_exp_id` подставляет ее в Read 1 сам (явный аргумент всегда важнее). Если резолв не удался - в лог пишется предупреждение и отчет просит явный `admin_exp_id`.
+
 Отчет - two-read (`ug_experiment_calculator.bandit_report`):
 
 ```python
