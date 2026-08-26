@@ -685,3 +685,78 @@ mobweb_app_tab_view_600s_events_cnt:
   - platforms: ["mobile"]
   - description: "unique datetime Tab View 600s events for mobweb app members during experiment window"
   - table_position: 62
+
+# --- Bandit (aix) cohort stats ----------------------------------------------
+# Only for the bandit cohort (client "UG_WEB BANDIT"). `participants` is the
+# bandit denominator population: distinct users on
+# 'Bandit Experiment User Participate', attributed to their first-touch arm.
+
+participants:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Participants"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct users on 'Bandit Experiment User Participate', first-touch attributed to the arm"
+  - table_position: 101
+
+banner_view_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Banner Viewers"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants with a Permanent Banner View event"
+  - table_position: 102
+
+banner_click_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Banner Clickers"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants with a Permanent Banner Click event (the bandit's OEC)"
+  - table_position: 103
+
+banner_close_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Banner Closers"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants who dismissed the banner"
+  - table_position: 104
+
+plans_view_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Plans Viewers"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants with a Landing Plans View event"
+  - table_position: 105
+
+checkout_view_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Checkout Viewers"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants with a Landing Checkout View event"
+  - table_position: 106
+
+purchase_success_user_cnt:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - type: int
+  - display_name: "Purchase Successes"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "distinct participants with a PURCHASE_SUCCESS event; lower bound after sign-up"
+  - table_position: 107

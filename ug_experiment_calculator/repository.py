@@ -41,7 +41,12 @@ EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
 UG_WEB_CLIENT = "UG_WEB"
 UG_WEB_DESKTOP_CLIENT = "UG_WEB DESKTOP"
 UG_WEB_MOBWEB_CLIENT = "UG_WEB MOBWEB"
-UG_WEB_CALCULATION_CLIENTS = {UG_WEB_DESKTOP_CLIENT, UG_WEB_MOBWEB_CLIENT}
+# Calculation client of a bandit (aix) experiment cohort: web events on all
+# platforms, cohort entry 'Bandit Experiment User Participate', groups are arms.
+UG_WEB_BANDIT_CLIENT = "UG_WEB BANDIT"
+UG_WEB_CALCULATION_CLIENTS = {UG_WEB_DESKTOP_CLIENT, UG_WEB_MOBWEB_CLIENT, UG_WEB_BANDIT_CLIENT}
+
+BANDIT_EXP_USERS_EXTRA_COLUMNS = ("arm", "is_arm_switcher")
 
 
 def get_config(config: Optional[ExperimentCalculatorConfig] = None) -> ExperimentCalculatorConfig:
@@ -293,6 +298,13 @@ def prepare_df_for_clickhouse(df: pd.DataFrame) -> pd.DataFrame:
         "access_otp_cnt",
         "subscriptions_cnt",
         "access_cnt",
+        "participants",
+        "banner_view_user_cnt",
+        "banner_click_user_cnt",
+        "banner_close_user_cnt",
+        "plans_view_user_cnt",
+        "checkout_view_user_cnt",
+        "purchase_success_user_cnt",
         "charged_trial_cnt",
         "expected_trial_cnt",
         "any_charged_trial_cnt",
@@ -607,7 +619,20 @@ def get_ugg_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) ->
     return get_exps_list("UG Growth", config=config)
 
 
+def is_bandit_exp_info(exp_info: dict) -> bool:
+    return bool(exp_info.get("is_bandit"))
+
+
+def is_bandit_client(client: str) -> bool:
+    return str(client) == UG_WEB_BANDIT_CLIENT
+
+
 def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -> dict:
+    from .bandit import get_bandit_experiment, is_bandit_experiment_id
+
+    if is_bandit_experiment_id(id):
+        return get_bandit_experiment(str(id).strip(), config=config)
+
     query = get_query("get_ug_exp_info", params={"id": id}, config=config)
     df = execute_sql(query)
     clients_pattern = r"(\w+)"
@@ -631,6 +656,10 @@ def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -
 
 
 def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
+    if is_bandit_exp_info(exp_info):
+        # A bandit experiment has no admin start/stop history: one launch window.
+        return [dict(exp_info)]
+
     base_id = experiment_base_id(exp_info)
     query = f"""
         select
@@ -687,6 +716,10 @@ def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalcul
 
 
 def get_experiment_client_contexts(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
+    if is_bandit_exp_info(exp_info):
+        # No admin client history for a bandit: the single bandit web client as-is.
+        return _current_experiment_client_contexts(exp_info)
+
     base_id = experiment_base_id(exp_info)
     launch_start = int(exp_info.get("date_start", 0) or 0)
     launch_end = int(exp_info.get("date_end", 0) or 0)
@@ -1062,7 +1095,7 @@ def _platform_values_are_mobweb(platform_values: list[object]) -> bool:
 def is_mobweb_segment(segment: dict, clients_options: object = "", client: str = "UG_WEB") -> bool:
     if str(client) == UG_WEB_MOBWEB_CLIENT:
         return True
-    if str(client) == UG_WEB_DESKTOP_CLIENT:
+    if str(client) in {UG_WEB_DESKTOP_CLIENT, UG_WEB_BANDIT_CLIENT}:
         return False
 
     if "platform" in segment:
@@ -1099,6 +1132,10 @@ def is_mobweb_segment(segment: dict, clients_options: object = "", client: str =
 
 def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: object = "", insert: bool = False) -> str:
     suffix = "_insert" if insert else ""
+    if is_bandit_client(client):
+        # The bandit cohort is rebuilt in one full-window pass, so the same
+        # template serves both the schema seed and the insert.
+        return "exp_raw_data_bandit"
     if base_client_for_calculation(client) == UG_WEB_CLIENT:
         if is_mobweb_segment(segment, clients_options, client):
             return f"exp_raw_data_mobweb{suffix}"
@@ -1107,6 +1144,9 @@ def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: obje
 
 
 def web_event_platform_filter_sql(client: str, segment: dict, clients_options: object = "") -> str:
+    if is_bandit_client(client):
+        # The bandit cohort spans desktop and mobile web alike.
+        return "1"
     if base_client_for_calculation(client) != UG_WEB_CLIENT:
         return "1"
     if is_mobweb_segment(segment, clients_options, client):
@@ -1336,13 +1376,13 @@ MOBWEB_APP_USERS_SCHEMA = """
 )
 """
 
-def _exp_users_insert_columns_sql() -> str:
-    return ", ".join(f"`{column}`" for column in EXP_USERS_COLUMNS)
+def _exp_users_insert_columns_sql(extra_columns: tuple[str, ...] = ()) -> str:
+    return ", ".join(f"`{column}`" for column in (*EXP_USERS_COLUMNS, *extra_columns))
 
 
-def _exp_users_insert_prefix(table_name: str) -> str:
+def _exp_users_insert_prefix(table_name: str, extra_columns: tuple[str, ...] = ()) -> str:
     return f"""
-        insert into {table_name} ({_exp_users_insert_columns_sql()})
+        insert into {table_name} ({_exp_users_insert_columns_sql(extra_columns)})
         settings insert_deduplicate = 0
     """
 
@@ -1351,7 +1391,14 @@ def _quoted_identifier(name: str) -> str:
     return "`" + str(name).replace("`", "``") + "`"
 
 
-def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_hash: str) -> str:
+def _wrap_exp_users_query(
+    query: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str,
+    extra_columns: tuple[str, ...] = (),
+) -> str:
+    extra_columns_sql = "".join(f",\n            `{column}`" for column in extra_columns)
     return f"""
         select
             `unified_id`,
@@ -1377,7 +1424,7 @@ def _wrap_exp_users_query(query: str, client: str, segment_name: str, segment_ha
             `type`,
             `is_new`,
             `connection`,
-            `device_manufacturer`
+            `device_manufacturer`{extra_columns_sql}
         from (
             {query}
         )
@@ -2462,6 +2509,76 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
         execute_sql_modify(f"insert into {cfg.subscription_transactions_table}\n{transactions_query}")
 
 
+def _create_bandit_experiment_users_table(
+    exp_info: dict,
+    client: str,
+    segment_name: str,
+    segment: dict,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    """Create/refresh the bandit cohort: one full-window rebuild per calculation.
+
+    First-touch attribution means a user's arm-switch flag can flip as the window
+    extends, so the cohort is rebuilt whole instead of being appended day by day.
+    """
+    from .bandit import arm_variation_transform_sql, ensure_bandit_arms
+
+    cfg = get_config(config)
+    table_name = f"exp_users_{experiment_storage_id(exp_info)}"
+    full_table_name = cfg.full_table(table_name)
+    segment_hash = get_experiment_users_hash(exp_info, client, segment)
+    where_filter, having_filter = _experiment_users_query_filters(exp_info, segment)
+    exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
+
+    arm_variation_map = ensure_bandit_arms(exp_info, config=cfg)
+    query_params = {
+        "where_sql": where_filter,
+        "having_sql": having_filter,
+        "date_filter": exp_start_dt.strftime("%Y-%m-%d"),
+        "client": source_client_for_calculation(client),
+        "aix_experiment_id_sql": _clickhouse_string_literal(str(exp_info["aix_experiment_id"])),
+        "arm_variation_sql": arm_variation_transform_sql(arm_variation_map, "`arm`"),
+    } | _experiment_time_params(exp_info)
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        query_part_1 = create_table_sql(
+            table_name,
+            schema="",
+            partition="toYYYYMM(toDate(exp_start_dt)), client, segment",
+            sorting="client, segment, segment_hash, exp_start_dt",
+            config=cfg,
+        )
+        seed_query = get_query("exp_raw_data_bandit", params=query_params, config=cfg)
+        query_part_2 = _wrap_exp_users_query(
+            seed_query,
+            client,
+            segment_name,
+            segment_hash,
+            extra_columns=BANDIT_EXP_USERS_EXTRA_COLUMNS,
+        )
+        query = query_part_1 + "\n as \n select * from (\n" + query_part_2 + "\n) where 0"
+        logger.info("Creating bandit experiment users table with query:\n%s", query)
+        execute_sql_modify(query)
+
+    _delete_exp_users_segment(full_table_name, client, segment_name, config=cfg)
+
+    query_part_1 = _exp_users_insert_prefix(full_table_name, extra_columns=BANDIT_EXP_USERS_EXTRA_COLUMNS)
+    insert_query = get_query("exp_raw_data_bandit", params=query_params, config=cfg)
+    query = query_part_1 + "\n" + _wrap_exp_users_query(
+        insert_query,
+        client,
+        segment_name,
+        segment_hash,
+        extra_columns=BANDIT_EXP_USERS_EXTRA_COLUMNS,
+    )
+    logger.info("Inserting bandit experiment users with query:\n%s", query)
+    execute_sql_modify(query)
+
+    return full_table_name
+
+
 def create_experiment_users_table(
     exp_info: dict,
     client: str,
@@ -2470,6 +2587,9 @@ def create_experiment_users_table(
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
+    if is_bandit_exp_info(exp_info) or is_bandit_client(client):
+        return _create_bandit_experiment_users_table(exp_info, client, segment_name, segment, config=config)
+
     cfg = get_config(config)
     exp_id = experiment_base_id(exp_info)
     exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
@@ -2901,6 +3021,46 @@ def get_tab_view_metrics(
         config=config,
     )
     logger.info("tab view query:\n%s", query)
+    return execute_sql(query)
+
+
+def get_bandit_funnel_metrics(
+    exp_info: dict,
+    exp_users_table: str,
+    client: str,
+    segment_name: str,
+    segment_hash: str = "",
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    """Banner funnel raw aggregates per cohort day and arm variation.
+
+    Only events tagged with this experiment's aix_experiment_id count (matching
+    the reference Redash 28893 shape) — untagged occurrences of generic events
+    (Landing Plans View, PURCHASE_SUCCESS) are organic traffic, not the banner
+    funnel, so post-registration steps are a documented lower bound. Step users
+    are attributed to the arm in the event's own aix_variant_id parameter, with
+    a fallback to the user's first-touch arm when the variant parameter is
+    empty; the participants denominator is always first-touch.
+    """
+    from .bandit import arm_variation_transform_sql, get_bandit_arm_variation_map
+
+    cfg = get_config(config)
+    arm_variation_map = get_bandit_arm_variation_map(str(exp_info["aix_experiment_id"]), config=cfg)
+    query = get_query(
+        "bandit_funnel_metrics",
+        params={
+            "exp_users_table": exp_users_table,
+            "client_sql": _clickhouse_string_literal(client),
+            "segment_sql": _clickhouse_string_literal(segment_name),
+            "segment_hash_sql": _clickhouse_string_literal(segment_hash),
+            "aix_experiment_id_sql": _clickhouse_string_literal(str(exp_info["aix_experiment_id"])),
+            "arm_variation_sql": arm_variation_transform_sql(arm_variation_map, "`event_arm`"),
+        }
+        | _experiment_time_params(exp_info),
+        config=cfg,
+    )
+    logger.info("bandit funnel query:\n%s", query)
     return execute_sql(query)
 
 

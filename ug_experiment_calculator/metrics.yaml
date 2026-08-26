@@ -891,3 +891,135 @@ mobweb app tab view 600s events per user:
   - description: "average number of mobweb app Tab View 600s events per member within experiment window"
   - table_position: 59
   - positive: 1
+
+# --- Bandit (aix) banner funnel metrics -------------------------------------
+# Apply only to the bandit cohort (client "UG_WEB BANDIT"): their columns are
+# produced solely by the bandit resolver and their denominator population is
+# stated explicitly (participants = distinct users on
+# 'Bandit Experiment User Participate', first-touch attributed) — substituting
+# another population is impossible by construction: no other cohort emits the
+# `participants` column and no other client matches the sources gate.
+
+participants -> banner view, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: banner_view_user_cnt
+  - denominator: participants
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "share of bandit participants who got a banner view event (sanity: participate fires on the banner's first view)"
+  - table_position: 101
+  - positive: 1
+  - suffix: "%"
+
+participants -> banner click, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: banner_click_user_cnt
+  - denominator: participants
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "the bandit's own OEC recomputed on the warehouse side; first place to compare with aix counters"
+  - table_position: 102
+  - positive: 1
+  - suffix: "%"
+
+participants -> banner close, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: banner_close_user_cnt
+  - denominator: participants
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "annoyance proxy - share of participants who dismissed the banner; the bandit cannot see it"
+  - table_position: 103
+  - positive: 0
+  - suffix: "%"
+
+banner view -> banner click, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: banner_click_user_cnt
+  - denominator: banner_view_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "funnel step: banner viewers who clicked the banner CTA"
+  - table_position: 104
+  - positive: 1
+  - suffix: "%"
+
+banner click -> plans view, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: plans_view_user_cnt
+  - denominator: banner_click_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "funnel step: banner clickers who reached the landing plans view (denominator is the previous step, not participants)"
+  - table_position: 105
+  - positive: 1
+  - suffix: "%"
+
+plans view -> checkout, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: checkout_view_user_cnt
+  - denominator: plans_view_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "funnel step: plans viewers who reached the checkout view"
+  - table_position: 106
+  - positive: 1
+  - suffix: "%"
+
+checkout -> purchase success, %:
+  - domain: "monetization"
+  - subdomain: "bandit_funnel"
+  - numerator: purchase_success_user_cnt
+  - denominator: checkout_view_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "funnel step: checkout viewers with a purchase success event; lower bound after sign-up (attribution can be lost at registration)"
+  - table_position: 107
+  - positive: 1
+  - suffix: "%"
+
+participants -> trials, %:
+  - domain: "monetization"
+  - numerator: access_trial_cnt
+  - denominator: participants
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "share of bandit participants who started a trial (subscription source joined on unified_id)"
+  - table_position: 108
+  - positive: 1
+  - suffix: "%"
+
+participants -> buyers, %:
+  - domain: "monetization"
+  - numerator: buyer_cnt
+  - denominator: participants
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_WEB BANDIT"]
+  - platforms: ["all"]
+  - description: "bottom-of-funnel acquisition per bandit participant"
+  - table_position: 109
+  - positive: 1
+  - suffix: "%"
