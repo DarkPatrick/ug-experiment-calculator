@@ -807,6 +807,57 @@ SQL-шаблоны лежат в `ug_experiment_calculator/queries` и чита�
 | `rollout_recent_users_daily.sql` | Среднее количество активных пользователей в день для оценки раскатки. |
 | `create_table_template.sql` | DDL-шаблон для Replicated ClickHouse-таблиц. |
 
+## Bandit-эксперименты (aix)
+
+Пакет умеет считать multi-armed-bandit эксперименты системы **aix** (AI Experimentor), которые живут вне UG A/B админки. Их идентификатор - строковый slug (`ug_seasons_sale_banner_iter_4`), а группы - **арм**ы, чьи id приходят в event-параметре `aix_variant_id` на `default.ug_rt_events_web`. Вход в когорту - событие `Bandit Experiment User Participate`.
+
+```python
+from ug_experiment_calculator import calculate_exp_info
+
+calculate_exp_info("ug_seasons_sale_banner_iter_4")
+```
+
+`calculate_exp_info` сам распознает slug (`is_bandit_experiment_id`) и меняет **только первый шаг** пайплайна - сбор когорты; шаги 2-4 (subscription source, `monetization_metrics.sql`, накопления/сравнения) переиспользуются без изменений, ни одна метрика не переименована.
+
+Как это устроено:
+
+- **Окно эксперимента** берется из самих participate-событий (нижняя граница скана - `EXPERIMENT_BANDIT_EVENTS_START_DATE`, по умолчанию `2026-08-01`); статус running/closed уточняется по snapshot-таблицам lifecycle-поллера (`ug_monetization_aix_lifecycle_*`), если они есть.
+- **Числовой `output_exp_id`** для партиций результата выдается slug-у один раз из реестра `ug_exp_bandit_experiments` (диапазон от `-1 000 000 001` вниз); человекочитаемый slug хранится в `exp_launch_id`.
+- **Арм -> номер вариации** назначается один раз и никогда не перенумеровывается (реестр `ug_exp_bandit_arms`): `control` -> 1, остальные по порядку первого появления; новые армы дописываются после максимума. Там же лежат факты арма: окно экспозиции (min/max его participate-событий), число participants и arm-switcher-ов.
+- **Когорта** (`exp_raw_data_bandit.sql`, расчетный клиент `UG_WEB BANDIT`, обе web-платформы) - one row per user по **first-touch**: арм с первого participate-события в окне; колонки `arm` и `is_arm_switcher` дописаны к обычной схеме exp_users. Свитчеры не выбрасываются - они остаются в first-touch арме и считаются. Когорта пересобирается целиком при каждом расчете (инкремент по дням не используется, потому что флаг свитчера меняется задним числом).
+- **Денominator bandit-метрик - `participants`** (distinct users на participate-событии). Колонку `participants` выдает только bandit-резолвер, а bandit-метрики в `metrics.yaml` включены только для source `UG_WEB BANDIT` - подстановка другой популяции невозможна по построению. Для когорты бандита `members` из monetization-агрегатов численно равен `participants` (вход в когорту и есть participate), поэтому существующие метрики (`arpu, $`, `trial -> charge, %`, web retention) применяются как есть.
+- **Воронка баннера** (`bandit_funnel_metrics.sql`, метрики с subdomain `bandit_funnel`): participants -> banner view -> click -> plans -> checkout -> purchase success (+ banner close как annoyance-прокси); знаменатель каждого шага - предыдущий шаг. Считаются только события, тегированные `aix_experiment_id` этого эксперимента (как в референсе Redash 28893) - нетегированные Landing Plans View / PURCHASE_SUCCESS это органический трафик, а не воронка баннера, поэтому шаги после регистрации - задокументированный lower bound. Арм шага берется из собственного `aix_variant_id` события, с fallback на first-touch арм при пустом параметре.
+- **Значимость подавлена by design**: `calc_metrics_stats_by_variation_pairs(..., suppress_significance=True)` пишет pairwise-строки (mean/lift против арма `control`) с `pvalue`/`ci_low`/`ci_high` = NaN - размеры армов эндогенны (бандит дает трафик победителям), фиксированный p-value невалиден. Значимость существует только на обертке - обычном admin-эксперименте с holdout-вариацией, который считается обычным `calculate_exp_info(<admin_id>)`.
+- **Реконсиляция с aix-счетчиками** выполняется один раз: наш `participants -> banner click` против `exposures/conversions` из `ug_monetization_aix_lifecycle_arm_snapshots`; остаточное расхождение записывается в `ug_exp_bandit_reconciliation` и далее только читается отчетами (разрыв структурный: другой дедуп, кумулятивные счетчики aix, ожидание ассайнмента до 1500 мс). Повторная запись - только `reconcile_bandit_experiment(..., force=True)`.
+- **Rollout-блок не считается** для бандита (нет админского сплита).
+
+**Автодискавери бандитов.** `get_bandit_exps_list()` - bandit-аналог `get_exps_list`: возвращает слаги экспериментов production-origin `www.ultimate-guitar.com` (стенды `*.lan` отфильтровываются по хосту) со статусом `active` плюс завершенные/приостановленные за последние 30 дней (`include_ended_days`; зеркалит классическую семантику "status = 1 или закончился <=30 дней назад"). Источник - живой инстанс aix (`GET /api/experiments`, креды `AI_BANDIT_URL` / `AI_BANDIT_LOGIN` / `AI_BANDIT_PASSWORD` из `.env`); при их отсутствии или недоступности API список берется из снапшотов lifecycle-поллера в ClickHouse (5-минутное зеркало того же инстанса). `closed_at` берется из lifecycle-conclusions, при отсутствии - `created_at` как прокси.
+
+```python
+from ug_experiment_calculator import calculate_exp_info, get_bandit_exps_list
+
+for slug in get_bandit_exps_list():
+    calculate_exp_info(slug)
+```
+
+`get_bandit_experiments()` возвращает тот же список с деталями (status, origin, product_id, created_at, closed_at).
+
+**Автоопределение admin-обертки.** Связку "слаг <-> admin-эксперимент с holdout" (например `ug_seasons_sale_banner_iter_4` <-> 7832) определяет `resolve_bandit_admin_experiment(exp_info)`, приоритеты: (1) закэшированная связка в `ug_exp_bandit_experiments` (колонка `admin_exp_id`), (2) admin-эксперимент, чья `Configuration` упоминает слаг (ручной override - просто впишите слаг в конфигурацию обертки), (3) эмпирика из participate-событий: обертка - это admin-эксперимент, который покрывает ~100% партиципантов и чья вариация 1 (holdout) среди них выедена (holdout не получает aix-контент и participate не шлет; пороги: coverage >= 0.95, доля вариации 1 <= 0.2%, tie-break - перекрытие окон). Успешный резолв кэшируется в реестре; `calculate_exp_info` по слагу резолвит связку автоматически, а `get_bandit_experiment_confluence_report_code(slug)` без `admin_exp_id` подставляет ее в Read 1 сам (явный аргумент всегда важнее). Если резолв не удался - в лог пишется предупреждение и отчет просит явный `admin_exp_id`.
+
+Отчет - two-read (`ug_experiment_calculator.bandit_report`):
+
+```python
+from ug_experiment_calculator import get_bandit_experiment_confluence_report_code
+
+report_code = get_bandit_experiment_confluence_report_code(
+    "ug_seasons_sale_banner_iter_4",
+    admin_exp_id=7832,   # обертка с holdout; None - только per-arm блок
+    top_arms=10,
+)
+```
+
+Read 1 - фиксированный admin-A/B (holdout против AI-bucket), единственный слой со значимостью. Read 2 - описательная per-arm таблица: армы колонками (control первым, дальше топ по participants, хвост сгруппирован в одну колонку "other N arms"), у каждого арма рядом со значениями метрик - participants, окно экспозиции, arm-switcher share (метка `contaminated` при >5%) и aix exposures; p-value нет by design. Плюс expand с записанной реконсиляцией. Значения per-arm таблицы пересчитываются из счетчиков `ug_exp_stats` (numerator/denominator метрики), поэтому сгруппированная колонка точная, а пул из 76 армов остается читаемым.
+
 ## Важные допущения и ограничения
 
 - Контрольная вариация сейчас жестко считается равной `1` в основном пайплайне.

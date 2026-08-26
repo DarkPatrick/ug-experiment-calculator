@@ -20,6 +20,8 @@ from .metrics import (
 from .repository import (
     cleanup_obsolete_experiment_clients,
     cleanup_obsolete_experiment_segments,
+    get_bandit_funnel_metrics,
+    is_bandit_exp_info,
     create_exp_funnel_results_table,
     create_exp_funnel_stats_table,
     create_exp_results_table,
@@ -67,6 +69,17 @@ EXPERIMENT_LAUNCH_COLUMNS = {
     "base_exp_id": "Int64",
     "exp_launch_id": "String",
 }
+
+
+BANDIT_FUNNEL_COLUMNS = [
+    "participants",
+    "banner_view_user_cnt",
+    "banner_click_user_cnt",
+    "banner_close_user_cnt",
+    "plans_view_user_cnt",
+    "checkout_view_user_cnt",
+    "purchase_success_user_cnt",
+]
 
 
 RETENTION_COUNT_COLUMNS = [
@@ -303,6 +316,20 @@ def _calculate_exp_segment_info(
 
     if include_product_metrics:
         df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
+
+    is_bandit = is_bandit_exp_info(exp_info)
+    if is_bandit:
+        logger.info("Loading bandit banner funnel metrics")
+        bandit_funnel_df = get_bandit_funnel_metrics(
+            exp_info,
+            exp_users_table,
+            client,
+            segment_name,
+            segment_hash,
+            config=cfg,
+        )
+        df = _merge_metric_frame(df, bandit_funnel_df, BANDIT_FUNNEL_COLUMNS)
+
     frame_key = (exp_launch_id, client, segment_name)
     df_tot[frame_key] = df
 
@@ -392,6 +419,7 @@ def _calculate_exp_segment_info(
         clients_options=exp_info.get("clients_options", ""),
         mobweb_product_metrics_sample_rate=cfg.mobweb_product_metrics_sample_rate,
         domain=None if include_product_metrics else "monetization",
+        suppress_significance=is_bandit,
     )
 
     stats_metric_columns = stats_columns_for_client(
@@ -609,9 +637,56 @@ def calculate_exp_info(
                 config=cfg,
             )
 
-        if update_rollout and exp_info.get("is_latest_launch", True):
+        if is_bandit_exp_info(exp_info):
+            _resolve_bandit_admin_experiment(exp_info, config=cfg)
+            _record_bandit_reconciliation(exp_info, df_tot, config=cfg)
+
+        if update_rollout and exp_info.get("is_latest_launch", True) and not is_bandit_exp_info(exp_info):
             logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
             update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
             logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"
+
+
+def _resolve_bandit_admin_experiment(exp_info: dict, *, config: ExperimentCalculatorConfig) -> None:
+    from .bandit import resolve_bandit_admin_experiment
+
+    try:
+        admin_exp_id = resolve_bandit_admin_experiment(exp_info, config=config)
+    except Exception:
+        logger.exception("Admin wrapper resolution failed for %s", exp_info.get("aix_experiment_id"))
+        return
+    if admin_exp_id is None:
+        logger.warning(
+            "Admin wrapper experiment not resolved for %s; the two-read report will need an explicit admin_exp_id",
+            exp_info.get("aix_experiment_id"),
+        )
+
+
+def _record_bandit_reconciliation(
+    exp_info: dict,
+    df_tot: dict,
+    *,
+    config: ExperimentCalculatorConfig,
+) -> None:
+    from .bandit import reconcile_bandit_experiment
+
+    exp_launch_id = experiment_launch_id(exp_info)
+    totals_df = None
+    for (launch_id, client, segment_name), frame in df_tot.items():
+        if launch_id == exp_launch_id and segment_name == "Total" and not frame.empty:
+            totals_df = (
+                frame.groupby("variation", as_index=False)[["participants", "banner_click_user_cnt"]].sum()
+                if {"participants", "banner_click_user_cnt"}.issubset(frame.columns)
+                else None
+            )
+            break
+    if totals_df is None:
+        logger.warning("No bandit Total frame with funnel columns found; reconciliation skipped")
+        return
+
+    try:
+        reconcile_bandit_experiment(exp_info, totals_df, config=config)
+    except Exception:
+        logger.exception("Bandit reconciliation failed for %s", exp_info.get("aix_experiment_id"))

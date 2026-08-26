@@ -8,6 +8,8 @@ This file is the operational contract for coding agents working in this reposito
 - `ug_experiment_calculator/repository.py` owns ClickHouse I/O, transient/source/result table management, experiment metadata, and SQL template execution.
 - `ug_experiment_calculator/metrics.py` owns cumulative aggregation, pairwise statistics, YAML normalization, metric/stat filtering, and funnel math.
 - `ug_experiment_calculator/config.py` owns environment parsing and physical ClickHouse table names.
+- `ug_experiment_calculator/bandit.py` owns bandit (aix) experiment identity: slug detection, the numeric output-id registry, the arm -> variation registry with per-arm facts, and the one-time aix reconciliation.
+- `ug_experiment_calculator/bandit_report.py` owns the two-read bandit Confluence report (admin holdout read + per-arm descriptive table with arm grouping).
 - `ug_experiment_calculator/rollout.py` owns rollout share and rollout impact estimates.
 - `ug_experiment_calculator/confluence_tables.py`, `confluence_charts.py`, `echarts.py`, `summary_tables.py`, and `value_formatting.py` are presentation/output layers.
 - SQL templates live in `ug_experiment_calculator/queries/`.
@@ -17,6 +19,8 @@ This file is the operational contract for coding agents working in this reposito
 ## Preferred Entry Points
 
 Use `calculate_exp_info(exp_id, config=None, update_rollout=True)` for a normal experiment recalculation. It handles experiment metadata, launch windows, users, subscription temp tables, monetization, product metrics, funnels, result writes, cleanup, and rollout updates.
+
+`calculate_exp_info` also accepts an aix bandit experiment slug (e.g. `"ug_seasons_sale_banner_iter_4"`). A slug switches only the cohort step to the bandit resolver (client `UG_WEB BANDIT`, entry event `Bandit Experiment User Participate`, arm from the `aix_variant_id` event param, first-touch attribution, full-window cohort rebuild); pipeline steps 2-4 are reused unchanged, pairwise p-values are suppressed by design (NaN in `ug_exp_results`), and rollout is skipped. Significance for a bandit project lives only on the wrapping admin experiment, calculated the ordinary way. See README "Bandit-эксперименты (aix)".
 
 Use lower-level repository methods only when you intentionally need part of the pipeline. Many of them require intermediate tables with specific schemas.
 

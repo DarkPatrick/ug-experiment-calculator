@@ -113,6 +113,9 @@ class ExperimentCalculatorConfig:
     default_clients: tuple[str, ...] = ("UGT_IOS", "UGT_ANDROID", "UG_WEB")
     update_subscription_sources: bool = False
     mobweb_product_metrics_sample_rate: float = 0.2
+    # Lower scan bound for bandit (aix) event discovery: the first aix experiment
+    # on UG web launched in August 2026, so nothing older can carry aix params.
+    bandit_events_start_date: datetime.date = datetime.date(2026, 8, 1)
 
     @classmethod
     def from_env(
@@ -123,6 +126,7 @@ class ExperimentCalculatorConfig:
         _load_dotenv(dotenv_path)
 
         start_date = os.environ.get(f"{prefix}SUBSCRIPTIONS_START_DATE", "2011-06-01")
+        bandit_events_start_date = os.environ.get(f"{prefix}BANDIT_EVENTS_START_DATE", "2026-08-01")
         queries_dir = os.environ.get(f"{prefix}QUERIES_DIR")
         metrics_yaml_path = os.environ.get(f"{prefix}METRICS_YAML_PATH")
         stats_yaml_path = os.environ.get(f"{prefix}STATS_YAML_PATH")
@@ -145,6 +149,7 @@ class ExperimentCalculatorConfig:
             default_clients=default_clients,
             update_subscription_sources=_env_bool(f"{prefix}UPDATE_SUBSCRIPTION_SOURCES", False),
             mobweb_product_metrics_sample_rate=_env_float(f"{prefix}MOBWEB_PRODUCT_METRICS_SAMPLE_RATE", 0.2),
+            bandit_events_start_date=datetime.datetime.strptime(bandit_events_start_date, "%Y-%m-%d").date(),
         )
 
     def physical_table(self, logical_table_name: str) -> str:

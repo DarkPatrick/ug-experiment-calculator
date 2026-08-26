@@ -1721,7 +1721,13 @@ def _expand_report_query_clients(
     if clients is None:
         return None
 
-    from .repository import get_experiment, get_experiment_clients
+    from .bandit import BANDIT_OUTPUT_EXP_ID_BASE
+    from .repository import UG_WEB_BANDIT_CLIENT, get_experiment, get_experiment_clients
+
+    # A bandit cohort has exactly one calculation client and no admin registry
+    # row to expand from; its result partitions use a reserved negative id.
+    if UG_WEB_BANDIT_CLIENT in {str(client) for client in clients} or int(exp_id) <= BANDIT_OUTPUT_EXP_ID_BASE:
+        return [str(client) for client in clients]
 
     exp_info = get_experiment(exp_id, config=config)
     return get_experiment_clients(exp_info, list(clients), config=config)

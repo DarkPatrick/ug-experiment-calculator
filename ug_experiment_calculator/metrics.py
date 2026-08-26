@@ -11,6 +11,7 @@ import scipy.stats as scipy_stats
 import yaml
 
 from .repository import (
+    UG_WEB_BANDIT_CLIENT,
     UG_WEB_CLIENT,
     UG_WEB_DESKTOP_CLIENT,
     UG_WEB_MOBWEB_CLIENT,
@@ -286,6 +287,10 @@ def _collect_platform_values(options: object) -> list[object]:
 
 
 def platform_buckets_for_context(client: str, segment: dict | None = None, clients_options: object = "") -> set[str]:
+    if client == UG_WEB_BANDIT_CLIENT:
+        # The bandit cohort spans desktop and mobile web; only platform-agnostic
+        # metric configs (platforms: ["all"]) apply to it.
+        return {"all"}
     if client == UG_WEB_DESKTOP_CLIENT:
         return {"desktop"}
     if client == UG_WEB_MOBWEB_CLIENT:
@@ -641,6 +646,7 @@ def calc_metrics_stats_by_variation_pairs(
     mobweb_product_metrics_sample_rate: float = 1.0,
     domain: str | None = None,
     subdomain: str | None = None,
+    suppress_significance: bool = False,
 ) -> pd.DataFrame:
     if mobweb_product_metrics_sample_rate <= 0:
         raise ValueError("mobweb_product_metrics_sample_rate must be greater than 0")
@@ -727,17 +733,29 @@ def calc_metrics_stats_by_variation_pairs(
                 else:
                     continue
 
-                stats = calc_stats(
-                    mean_0=mean_0,
-                    mean_1=mean_1,
-                    var_0=var_0,
-                    var_1=var_1,
-                    len_0=len_0,
-                    len_1=len_1,
-                )
+                if suppress_significance:
+                    # Bandit arms: descriptive read only — arm sizes are
+                    # endogenous to performance, so a fixed-horizon p-value
+                    # would be invalid and is suppressed by design.
+                    pvalue = np.nan
+                    ci_low = np.nan
+                    ci_high = np.nan
+                else:
+                    stats = calc_stats(
+                        mean_0=mean_0,
+                        mean_1=mean_1,
+                        var_0=var_0,
+                        var_1=var_1,
+                        len_0=len_0,
+                        len_1=len_1,
+                    )
+                    pvalue = stats["pvalue"]
+                    ci = stats["ci"]
+                    coefficient_ci = 100 if is_percentage else 1
+                    ci_low = ci[0][0] * coefficient_ci
+                    ci_high = ci[0][1] * coefficient_ci
 
                 mean_diff = mean_1 - mean_0
-                ci = stats["ci"]
                 coefficient = 100 if is_percentage else 1
 
                 result_rows.append({
@@ -750,9 +768,9 @@ def calc_metrics_stats_by_variation_pairs(
                     "mean_1": mean_1 * coefficient,
                     "mean_diff": mean_diff * coefficient,
                     "lift": mean_diff / mean_0 * 100 if mean_0 != 0 else 0,
-                    "ci_low": ci[0][0] * coefficient,
-                    "ci_high": ci[0][1] * coefficient,
-                    "pvalue": stats["pvalue"],
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
+                    "pvalue": pvalue,
                     "numerator": numerator_col,
                     "denominator": denominator_col,
                     "variance": variance_col,
