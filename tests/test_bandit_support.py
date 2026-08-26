@@ -7,6 +7,7 @@ from ug_experiment_calculator.bandit import (
     BANDIT_ENTRY_EVENT,
     arm_variation_transform_sql,
     assign_arm_variations,
+    filter_bandit_experiments,
     is_bandit_experiment_id,
 )
 from ug_experiment_calculator.bandit_report import build_bandit_arm_confluence_table_code
@@ -107,6 +108,48 @@ class ArmVariationAssignmentTests(unittest.TestCase):
 
     def test_empty_mapping_yields_zero(self) -> None:
         self.assertEqual(arm_variation_transform_sql({}, "`arm`"), "toUInt32(0)")
+
+
+class BanditDiscoveryFilterTests(unittest.TestCase):
+    def _experiments_frame(self) -> pd.DataFrame:
+        now = pd.Timestamp("2026-08-26", tz="UTC")
+        return pd.DataFrame(
+            [
+                {"aix_experiment_id": "ug_active", "status": "active", "origin": "https://www.ultimate-guitar.com", "created_at": now - pd.Timedelta(days=2), "closed_at": pd.NaT},
+                {"aix_experiment_id": "ug_recently_closed", "status": "closed", "origin": "https://www.ultimate-guitar.com", "created_at": now - pd.Timedelta(days=10), "closed_at": now - pd.Timedelta(days=5)},
+                {"aix_experiment_id": "ug_old_closed", "status": "closed", "origin": "https://www.ultimate-guitar.com", "created_at": now - pd.Timedelta(days=90), "closed_at": now - pd.Timedelta(days=60)},
+                {"aix_experiment_id": "ug_paused_no_closed_at", "status": "paused", "origin": "https://www.ultimate-guitar.com", "created_at": now - pd.Timedelta(days=3), "closed_at": pd.NaT},
+                {"aix_experiment_id": "ug_stand", "status": "active", "origin": "https://www.ug.zenkovets.lan", "created_at": now - pd.Timedelta(days=1), "closed_at": pd.NaT},
+                {"aix_experiment_id": "musescore_exp", "status": "active", "origin": "https://musescore.com", "created_at": now - pd.Timedelta(days=1), "closed_at": pd.NaT},
+            ]
+        )
+
+    def test_only_prod_ug_origin_kept(self) -> None:
+        result = filter_bandit_experiments(
+            self._experiments_frame(),
+            now=pd.Timestamp("2026-08-26", tz="UTC"),
+        )
+        slugs = set(result["aix_experiment_id"])
+        self.assertNotIn("ug_stand", slugs)
+        self.assertNotIn("musescore_exp", slugs)
+
+    def test_active_plus_recently_ended_semantics(self) -> None:
+        result = filter_bandit_experiments(
+            self._experiments_frame(),
+            include_ended_days=30,
+            now=pd.Timestamp("2026-08-26", tz="UTC"),
+        )
+        slugs = set(result["aix_experiment_id"])
+        self.assertEqual(slugs, {"ug_active", "ug_recently_closed", "ug_paused_no_closed_at"})
+
+    def test_created_at_is_the_fallback_for_missing_closed_at(self) -> None:
+        result = filter_bandit_experiments(
+            self._experiments_frame(),
+            include_ended_days=1,
+            now=pd.Timestamp("2026-08-26", tz="UTC"),
+        )
+        slugs = set(result["aix_experiment_id"])
+        self.assertEqual(slugs, {"ug_active"})
 
 
 class BanditMetricConfigTests(unittest.TestCase):

@@ -22,8 +22,14 @@ labels), and the bandit cohort denominator is ``participants`` — distinct user
 
 from __future__ import annotations
 
+import base64
 import datetime
+import json
 import logging
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Optional
 
 from clickhouse_worker import (
@@ -41,6 +47,12 @@ logger = logging.getLogger(__name__)
 
 BANDIT_ENTRY_EVENT = "Bandit Experiment User Participate"
 BANDIT_CONTROL_ARM = "control"
+# Canonical UG production host key: aix collapses every *.ultimate-guitar.com
+# host onto it, while stands run under their own origins (and experiment ids).
+UG_PROD_ORIGIN_HOST = "www.ultimate-guitar.com"
+# Mirror of the classic to-calc semantics (status = 1 OR ended within 30 days).
+DEFAULT_BANDIT_ENDED_LOOKBACK_DAYS = 30
+AIX_API_TIMEOUT_SECONDS = 90
 # Result-table partitions are keyed by Int64 exp_id; launch windows already use
 # -(exp_id * 1000 + launch_number), so bandit ids live in their own range below it.
 BANDIT_OUTPUT_EXP_ID_BASE = -1_000_000_000
@@ -632,3 +644,200 @@ def reconcile_bandit_experiment(
     insert_dataframe(full_table_name, reconciliation_df)
     logger.info("Recorded bandit reconciliation for %s: %s arms, oec=%s", slug, len(rows), oec_event)
     return get_bandit_reconciliation(slug, config=cfg)
+
+
+def _origin_host(origin: object) -> str:
+    text = str(origin or "").strip().lower()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = f"https://{text}"
+    return urllib.parse.urlparse(text).netloc
+
+
+def _fetch_aix_api_experiments() -> Optional[pd.DataFrame]:
+    """Read the live experiment list from the aix instance (basic auth).
+
+    Credentials come from the environment (AI_BANDIT_URL / AI_BANDIT_LOGIN /
+    AI_BANDIT_PASSWORD, loaded from .env by ExperimentCalculatorConfig).
+    Returns None when they are absent or the call fails — callers fall back to
+    the lifecycle poller snapshots.
+    """
+    base_url = os.environ.get("AI_BANDIT_URL", "").strip()
+    login = os.environ.get("AI_BANDIT_LOGIN", "").strip()
+    password = os.environ.get("AI_BANDIT_PASSWORD", "")
+    if not base_url or not login or not password:
+        return None
+
+    url = base_url.rstrip("/") + "/api/experiments"
+    token = base64.b64encode(f"{login}:{password}".encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=AIX_API_TIMEOUT_SECONDS) as response:
+            items = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        logger.warning("aix API experiment list failed (%s); falling back to lifecycle snapshots", exc)
+        return None
+
+    if not isinstance(items, list):
+        logger.warning("aix API returned unexpected payload type %s; falling back to lifecycle snapshots", type(items))
+        return None
+
+    rows = [
+        {
+            "aix_experiment_id": str(item.get("experiment_id") or ""),
+            "status": str(item.get("status") or ""),
+            "origin": str(item.get("origin") or ""),
+            "product_id": str(item.get("product_id") or ""),
+            "created_at": pd.to_datetime(item.get("created_at"), errors="coerce", utc=True),
+        }
+        for item in items
+        if isinstance(item, dict) and item.get("experiment_id")
+    ]
+    return pd.DataFrame(rows)
+
+
+def _fetch_lifecycle_experiments(*, config: ExperimentCalculatorConfig) -> pd.DataFrame:
+    full_table_name = _lifecycle_table(AIX_LIFECYCLE_EXPERIMENT_SNAPSHOTS_TABLE, config=config)
+    if not _table_exists(full_table_name):
+        return pd.DataFrame()
+    df = execute_sql(
+        f"""
+        select
+            `aes`.`experiment_id` as `aix_experiment_id`,
+            argMax(`aes`.`status`, `aes`.`observed_at`) as `status`,
+            argMax(`aes`.`origin`, `aes`.`observed_at`) as `origin`,
+            argMax(`aes`.`product_id`, `aes`.`observed_at`) as `product_id`,
+            argMax(`aes`.`created_at`, `aes`.`observed_at`) as `created_at`
+        from {full_table_name} as `aes`
+        group by
+            `aix_experiment_id`
+        """
+    )
+    if not df.empty:
+        df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce", utc=True)
+    return df
+
+
+def _fetch_lifecycle_closed_at(*, config: ExperimentCalculatorConfig) -> dict[str, pd.Timestamp]:
+    full_table_name = _lifecycle_table(AIX_LIFECYCLE_CONCLUSIONS_TABLE, config=config)
+    if not _table_exists(full_table_name):
+        return {}
+    df = execute_sql(
+        f"""
+        select
+            `alc`.`experiment_id` as `aix_experiment_id`,
+            max(`alc`.`closed_at`) as `closed_at`
+        from {full_table_name} as `alc`
+        group by
+            `aix_experiment_id`
+        """
+    )
+    result = {}
+    for row in df.itertuples(index=False):
+        closed_at = pd.to_datetime(row.closed_at, errors="coerce", utc=True)
+        if not pd.isna(closed_at):
+            result[str(row.aix_experiment_id)] = closed_at
+    return result
+
+
+def filter_bandit_experiments(
+    experiments_df: pd.DataFrame,
+    *,
+    origin_host: str = UG_PROD_ORIGIN_HOST,
+    include_ended_days: int = DEFAULT_BANDIT_ENDED_LOOKBACK_DAYS,
+    now: Optional[pd.Timestamp] = None,
+) -> pd.DataFrame:
+    """Keep experiments on the given origin host: active ones plus paused/closed
+    ones that ended within the lookback (mirrors the classic to-calc semantics).
+
+    ``closed_at`` is used when known; otherwise ``created_at`` is the proxy —
+    aix experiments live for days, so a recently created one is recent, period.
+    """
+    if experiments_df is None or experiments_df.empty:
+        return pd.DataFrame(columns=["aix_experiment_id", "status", "origin", "product_id", "created_at", "closed_at"])
+
+    df = experiments_df.copy()
+    if "closed_at" not in df.columns:
+        df["closed_at"] = pd.NaT
+    target_host = _origin_host(origin_host) or str(origin_host).strip().lower()
+    df = df[df["origin"].map(_origin_host) == target_host]
+    if df.empty:
+        return df
+
+    now_ts = now if now is not None else pd.Timestamp.now(tz="UTC")
+    threshold = now_ts - pd.Timedelta(days=int(include_ended_days))
+
+    def keep(row) -> bool:
+        status = str(row["status"]).strip().lower()
+        if status == "active":
+            return True
+        ended_at = row["closed_at"]
+        if pd.isna(ended_at):
+            ended_at = row["created_at"]
+        if pd.isna(ended_at):
+            return False
+        return ended_at >= threshold
+
+    return df[df.apply(keep, axis=1)].reset_index(drop=True)
+
+
+def get_bandit_experiments(
+    origin_host: str = UG_PROD_ORIGIN_HOST,
+    *,
+    include_ended_days: int = DEFAULT_BANDIT_ENDED_LOOKBACK_DAYS,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    """Discover bandit experiments for an origin host.
+
+    Primary source is the live aix instance (AI_BANDIT_* credentials); when
+    they are absent or the call fails, the lifecycle poller snapshots serve
+    the same list from ClickHouse. ``closed_at`` always comes from the
+    lifecycle conclusions when available.
+    """
+    cfg = get_config(config)
+    experiments_df = _fetch_aix_api_experiments()
+    source = "aix API"
+    if experiments_df is None:
+        experiments_df = _fetch_lifecycle_experiments(config=cfg)
+        source = "lifecycle snapshots"
+    if experiments_df.empty:
+        logger.warning("No bandit experiments discovered from %s", source)
+        return experiments_df
+
+    closed_at_map = _fetch_lifecycle_closed_at(config=cfg)
+    experiments_df = experiments_df.copy()
+    experiments_df["closed_at"] = experiments_df["aix_experiment_id"].map(
+        lambda slug: closed_at_map.get(str(slug), pd.NaT)
+    )
+    result = filter_bandit_experiments(
+        experiments_df,
+        origin_host=origin_host,
+        include_ended_days=include_ended_days,
+    )
+    logger.info(
+        "Discovered %s bandit experiments for host %s via %s: %s",
+        len(result),
+        origin_host,
+        source,
+        result["aix_experiment_id"].tolist() if not result.empty else [],
+    )
+    return result
+
+
+def get_bandit_exps_list(
+    origin_host: str = UG_PROD_ORIGIN_HOST,
+    *,
+    include_ended_days: int = DEFAULT_BANDIT_ENDED_LOOKBACK_DAYS,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> list[str]:
+    """Slugs of bandit experiments to calculate, the bandit analog of
+    ``get_exps_list``: active plus recently ended, production origin only."""
+    experiments_df = get_bandit_experiments(
+        origin_host,
+        include_ended_days=include_ended_days,
+        config=config,
+    )
+    if experiments_df.empty:
+        return []
+    return [str(slug) for slug in experiments_df["aix_experiment_id"].tolist()]

@@ -831,6 +831,17 @@ calculate_exp_info("ug_seasons_sale_banner_iter_4")
 - **Реконсиляция с aix-счетчиками** выполняется один раз: наш `participants -> banner click` против `exposures/conversions` из `ug_monetization_aix_lifecycle_arm_snapshots`; остаточное расхождение записывается в `ug_exp_bandit_reconciliation` и далее только читается отчетами (разрыв структурный: другой дедуп, кумулятивные счетчики aix, ожидание ассайнмента до 1500 мс). Повторная запись - только `reconcile_bandit_experiment(..., force=True)`.
 - **Rollout-блок не считается** для бандита (нет админского сплита).
 
+**Автодискавери бандитов.** `get_bandit_exps_list()` - bandit-аналог `get_exps_list`: возвращает слаги экспериментов production-origin `www.ultimate-guitar.com` (стенды `*.lan` отфильтровываются по хосту) со статусом `active` плюс завершенные/приостановленные за последние 30 дней (`include_ended_days`; зеркалит классическую семантику "status = 1 или закончился <=30 дней назад"). Источник - живой инстанс aix (`GET /api/experiments`, креды `AI_BANDIT_URL` / `AI_BANDIT_LOGIN` / `AI_BANDIT_PASSWORD` из `.env`); при их отсутствии или недоступности API список берется из снапшотов lifecycle-поллера в ClickHouse (5-минутное зеркало того же инстанса). `closed_at` берется из lifecycle-conclusions, при отсутствии - `created_at` как прокси.
+
+```python
+from ug_experiment_calculator import calculate_exp_info, get_bandit_exps_list
+
+for slug in get_bandit_exps_list():
+    calculate_exp_info(slug)
+```
+
+`get_bandit_experiments()` возвращает тот же список с деталями (status, origin, product_id, created_at, closed_at).
+
 Отчет - two-read (`ug_experiment_calculator.bandit_report`):
 
 ```python
