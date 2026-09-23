@@ -588,17 +588,35 @@ def _bandit_window_end_date(exp_info: dict) -> Optional[datetime.date]:
     return datetime.datetime.fromtimestamp(date_end_ts, datetime.timezone.utc).date()
 
 
-def reconciliation_needs_final_record(exp_info: dict, recorded_window_end: object) -> bool:
+def reconciliation_needs_final_record(
+    exp_info: dict,
+    recorded_window_end: object,
+    *,
+    recorded_at: object = None,
+    closed_at: object = None,
+) -> bool:
     """True when an existing reconciliation predates the end of a finished experiment.
 
     The first record is taken on the first calculation, which for a bandit is usually
     day one with a handful of arms. Once the experiment has ended, the record is
     re-taken exactly once over the full window, so the data-quality gate covers the
-    final numbers and every arm; after that its ``window_end`` matches and it stays put.
+    final numbers and every arm.
+
+    "Once" is anchored on the aix close time when it is known: a record taken after
+    ``closed_at`` is final. The window end cannot serve as the anchor on its own,
+    because stray participate events keep arriving from cached pages for days after
+    a close and move the window end forward on every run. Without a close time the
+    record is final when its ``window_end`` reaches the window end.
     """
     final_end = _bandit_window_end_date(exp_info)
     if final_end is None:
         return False
+
+    closed_ts = pd.to_datetime(closed_at, errors="coerce", utc=True)
+    recorded_ts = pd.to_datetime(recorded_at, errors="coerce", utc=True)
+    if not pd.isna(closed_ts) and not pd.isna(recorded_ts):
+        return recorded_ts < closed_ts
+
     recorded_end = pd.to_datetime(recorded_window_end, errors="coerce")
     if pd.isna(recorded_end):
         return True
@@ -630,7 +648,8 @@ def reconcile_bandit_experiment(
             f"""
             select
                 count() as `rows_cnt`,
-                min(`rec`.`window_end`) as `min_window_end`
+                min(`rec`.`window_end`) as `min_window_end`,
+                min(`rec`.`recorded_at`) as `min_recorded_at`
             from {full_table_name} as `rec` final
             where
                 `rec`.`aix_experiment_id` = {_clickhouse_string_literal(slug)}
@@ -638,7 +657,17 @@ def reconcile_bandit_experiment(
         )
         if int(existing_df["rows_cnt"].iloc[0] or 0) > 0:
             recorded_window_end = existing_df["min_window_end"].iloc[0]
-            if not reconciliation_needs_final_record(exp_info, recorded_window_end):
+            closed_at = (
+                _fetch_lifecycle_closed_at(config=cfg).get(slug)
+                if _bandit_window_end_date(exp_info) is not None
+                else None
+            )
+            if not reconciliation_needs_final_record(
+                exp_info,
+                recorded_window_end,
+                recorded_at=existing_df["min_recorded_at"].iloc[0],
+                closed_at=closed_at,
+            ):
                 logger.info("Bandit reconciliation for %s already recorded; skipping (use force=True to re-record)", slug)
                 return get_bandit_reconciliation(slug, config=cfg)
             logger.info(

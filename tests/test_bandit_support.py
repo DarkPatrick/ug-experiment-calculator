@@ -73,6 +73,29 @@ class BanditReconciliationTests(unittest.TestCase):
         exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
         self.assertFalse(reconciliation_needs_final_record(exp_info, "2026-09-17"))
 
+    def test_record_before_close_is_rerecorded(self) -> None:
+        exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
+        self.assertTrue(
+            reconciliation_needs_final_record(
+                exp_info,
+                "2026-09-04",
+                recorded_at="2026-09-04 19:12:58",
+                closed_at="2026-09-17 10:16:47+00:00",
+            )
+        )
+
+    def test_record_after_close_stays_despite_stray_events(self) -> None:
+        # Stray participate events after the close push the window end to a later day.
+        exp_info = {"date_start": self.START_TS, "date_end": self.END_TS + 6 * 86400}
+        self.assertFalse(
+            reconciliation_needs_final_record(
+                exp_info,
+                "2026-09-23",
+                recorded_at="2026-09-23 11:49:20",
+                closed_at="2026-09-17 10:16:47+00:00",
+            )
+        )
+
     def test_unreadable_recorded_end_is_rerecorded_after_end(self) -> None:
         exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
         self.assertTrue(reconciliation_needs_final_record(exp_info, None))
