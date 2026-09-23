@@ -9,6 +9,7 @@ from ug_experiment_calculator.bandit import (
     assign_arm_variations,
     filter_bandit_experiments,
     is_bandit_experiment_id,
+    reconciliation_needs_final_record,
     select_bandit_admin_experiment,
 )
 from ug_experiment_calculator.bandit_report import build_bandit_arm_confluence_table_code
@@ -53,6 +54,28 @@ class BanditIdentityTests(unittest.TestCase):
         where_filter, _ = _experiment_users_query_filters(exp_info, {})
         self.assertIn(f"event = '{BANDIT_ENTRY_EVENT}'", where_filter)
         self.assertNotIn("item_id", where_filter)
+
+
+class BanditReconciliationTests(unittest.TestCase):
+    # 2026-09-04 00:00 UTC and 2026-09-17 10:10 UTC
+    START_TS = 1788480000
+    END_TS = 1789639800
+
+    def test_running_experiment_keeps_first_record(self) -> None:
+        exp_info = {"date_start": self.START_TS, "date_end": 0}
+        self.assertFalse(reconciliation_needs_final_record(exp_info, "2026-09-04"))
+
+    def test_ended_experiment_rerecords_an_early_record(self) -> None:
+        exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
+        self.assertTrue(reconciliation_needs_final_record(exp_info, "2026-09-04"))
+
+    def test_final_record_is_taken_only_once(self) -> None:
+        exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
+        self.assertFalse(reconciliation_needs_final_record(exp_info, "2026-09-17"))
+
+    def test_unreadable_recorded_end_is_rerecorded_after_end(self) -> None:
+        exp_info = {"date_start": self.START_TS, "date_end": self.END_TS}
+        self.assertTrue(reconciliation_needs_final_record(exp_info, None))
 
 
 class BanditDispatchTests(unittest.TestCase):

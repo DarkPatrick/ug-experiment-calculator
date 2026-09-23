@@ -579,6 +579,32 @@ def _get_lifecycle_arm_counters(aix_experiment_id: str, *, config: ExperimentCal
     )
 
 
+def _bandit_window_end_date(exp_info: dict) -> Optional[datetime.date]:
+    """End date of a finished bandit's calculation window; None while it is still running."""
+    date_start_ts = int(exp_info.get("date_start", 0) or 0)
+    date_end_ts = int(exp_info.get("date_end", 0) or 0)
+    if date_end_ts <= date_start_ts:
+        return None
+    return datetime.datetime.fromtimestamp(date_end_ts, datetime.timezone.utc).date()
+
+
+def reconciliation_needs_final_record(exp_info: dict, recorded_window_end: object) -> bool:
+    """True when an existing reconciliation predates the end of a finished experiment.
+
+    The first record is taken on the first calculation, which for a bandit is usually
+    day one with a handful of arms. Once the experiment has ended, the record is
+    re-taken exactly once over the full window, so the data-quality gate covers the
+    final numbers and every arm; after that its ``window_end`` matches and it stays put.
+    """
+    final_end = _bandit_window_end_date(exp_info)
+    if final_end is None:
+        return False
+    recorded_end = pd.to_datetime(recorded_window_end, errors="coerce")
+    if pd.isna(recorded_end):
+        return True
+    return recorded_end.date() < final_end
+
+
 def reconcile_bandit_experiment(
     exp_info: dict,
     our_totals_df: pd.DataFrame,
@@ -586,12 +612,14 @@ def reconcile_bandit_experiment(
     force: bool = False,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
-    """Record the one-time reconciliation of our per-arm OEC rate against aix counters.
+    """Record the reconciliation of our per-arm OEC rate against aix counters.
 
     ``our_totals_df`` must carry one row per variation with ``participants`` and
     ``banner_click_user_cnt`` totals over the calculation window. The recorded
-    residual is kept as-is on later runs (the gap is structural: different dedup,
-    aix retention, the 1500 ms assignment wait) — pass ``force=True`` to re-record.
+    residual is kept as-is on later runs while the experiment runs (the gap is
+    structural: different dedup, aix retention, the 1500 ms assignment wait). It is
+    re-recorded once after the experiment ends, over the full window
+    (``reconciliation_needs_final_record``) — pass ``force=True`` to re-record anyway.
     """
     cfg = get_config(config)
     slug = str(exp_info["aix_experiment_id"])
@@ -601,15 +629,23 @@ def reconcile_bandit_experiment(
         existing_df = execute_sql(
             f"""
             select
-                count() as `rows_cnt`
-            from {full_table_name} final
+                count() as `rows_cnt`,
+                min(`rec`.`window_end`) as `min_window_end`
+            from {full_table_name} as `rec` final
             where
-                `aix_experiment_id` = {_clickhouse_string_literal(slug)}
+                `rec`.`aix_experiment_id` = {_clickhouse_string_literal(slug)}
             """
         )
         if int(existing_df["rows_cnt"].iloc[0] or 0) > 0:
-            logger.info("Bandit reconciliation for %s already recorded; skipping (use force=True to re-record)", slug)
-            return get_bandit_reconciliation(slug, config=cfg)
+            recorded_window_end = existing_df["min_window_end"].iloc[0]
+            if not reconciliation_needs_final_record(exp_info, recorded_window_end):
+                logger.info("Bandit reconciliation for %s already recorded; skipping (use force=True to re-record)", slug)
+                return get_bandit_reconciliation(slug, config=cfg)
+            logger.info(
+                "Bandit %s has ended after its reconciliation (recorded window_end=%s); re-recording over the full window",
+                slug,
+                recorded_window_end,
+            )
 
     aix_df = _get_lifecycle_arm_counters(slug, config=cfg)
     if aix_df.empty:

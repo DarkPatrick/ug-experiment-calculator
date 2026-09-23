@@ -8,7 +8,7 @@ This file is the operational contract for coding agents working in this reposito
 - `ug_experiment_calculator/repository.py` owns ClickHouse I/O, transient/source/result table management, experiment metadata, and SQL template execution.
 - `ug_experiment_calculator/metrics.py` owns cumulative aggregation, pairwise statistics, YAML normalization, metric/stat filtering, and funnel math.
 - `ug_experiment_calculator/config.py` owns environment parsing and physical ClickHouse table names.
-- `ug_experiment_calculator/bandit.py` owns bandit (aix) experiment identity: slug detection, the numeric output-id registry, the arm -> variation registry with per-arm facts, and the one-time aix reconciliation.
+- `ug_experiment_calculator/bandit.py` owns bandit (aix) experiment identity: slug detection, the numeric output-id registry, the arm -> variation registry with per-arm facts, and the aix reconciliation (first record on the first calculation, re-recorded once over the full window after the experiment ends).
 - `ug_experiment_calculator/bandit_report.py` owns the two-read bandit Confluence report (admin holdout read + per-arm descriptive table with arm grouping).
 - `ug_experiment_calculator/rollout.py` owns rollout share and rollout impact estimates.
 - `ug_experiment_calculator/confluence_tables.py`, `confluence_charts.py`, `echarts.py`, `summary_tables.py`, and `value_formatting.py` are presentation/output layers.
