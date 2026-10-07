@@ -92,6 +92,9 @@ The normal `calculate_exp_info` flow is:
 
 Do not remove the lookback unless transaction logic changes to update by event date instead of subscription date.
 
+- The whole refresh range is skipped when both tables were rebuilt within `SUBSCRIPTION_SOURCE_FRESHNESS` (1 hour, judged by the oldest `updated_at` in the range) and hold one transactions row per subscription in every month.
+- Both tables are `ReplicatedMergeTree`, and a read right after an insert can be served by a replica that has not fetched the new parts yet. The transactions build therefore runs only after `SYSTEM SYNC REPLICA ON CLUSTER` on `subscriptions`, and every block is validated afterwards: transactions rows must equal subscriptions rows per month. A mismatch rebuilds the transactions block once more, then raises instead of letting a calculation read an incomplete table (2026-10-07: partition 202610 was not yet on the reading replica and every October charge vanished from experiment 8054).
+
 ## Experiment Users Contracts
 
 `create_experiment_users_table(exp_info, client, segment_name, segment, ...)` creates or updates `exp_users_{exp_launch_id}`.

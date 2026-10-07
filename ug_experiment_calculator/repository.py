@@ -31,6 +31,8 @@ from .config import ExperimentCalculatorConfig
 
 logger = logging.getLogger(__name__)
 SUBSCRIPTION_SOURCE_VERSION = 10
+SUBSCRIPTION_SOURCE_FRESHNESS = datetime.timedelta(hours=1)
+SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS = 2
 SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
 EXPERIMENT_USERS_CACHE_VERSION = 6
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
@@ -2189,26 +2191,87 @@ def _ensure_exp_users_segment_hash(
     _delete_exp_users_segment(table_name, client, segment_name, config=config)
 
 
-def _was_subscription_day_updated_recently(table_name: str, subscribed_date: datetime.date) -> bool:
+def _was_subscription_range_updated_recently(
+    table_name: str,
+    date_start: datetime.date,
+    date_end: datetime.date,
+) -> bool:
+    """True when every row of the refresh range was rewritten within the last hour.
+
+    The oldest ``updated_at`` decides: a range is fresh only if its whole block
+    was rebuilt recently, not just the current day.
+    """
     if not _table_has_column(table_name, "updated_at"):
         return False
 
     query = f"""
-        select max(`updated_at`) as `last_updated_at`
+        select min(`updated_at`) as `oldest_updated_at`
         from {table_name}
-        where toDate(`subscribed_dt`) = toDate('{subscribed_date}')
+        where toDate(`subscribed_dt`) between toDate('{date_start}') and toDate('{date_end}')
     """
     df = execute_sql(query)
-    last_updated_at = df["last_updated_at"].iloc[0]
-    if pd.isna(last_updated_at):
+    oldest_updated_at = df["oldest_updated_at"].iloc[0]
+    if pd.isna(oldest_updated_at):
         return False
 
-    if not isinstance(last_updated_at, datetime.datetime):
-        last_updated_at = datetime.datetime.strptime(str(last_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
-    if last_updated_at.tzinfo is None:
-        last_updated_at = last_updated_at.replace(tzinfo=datetime.timezone.utc)
+    if not isinstance(oldest_updated_at, datetime.datetime):
+        oldest_updated_at = datetime.datetime.strptime(str(oldest_updated_at)[:19], "%Y-%m-%d %H:%M:%S")
+    if oldest_updated_at.tzinfo is None:
+        oldest_updated_at = oldest_updated_at.replace(tzinfo=datetime.timezone.utc)
 
-    return last_updated_at >= datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+    return oldest_updated_at >= datetime.datetime.now(datetime.timezone.utc) - SUBSCRIPTION_SOURCE_FRESHNESS
+
+
+def _sync_table_replicas(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    """Wait until every replica of ``table_name`` has fetched all inserted parts.
+
+    Writes land on whichever replica the load balancer picks, and the next query
+    may be served by another one. Without this wait a read right after an insert
+    can miss whole partitions (2026-10-07: the transactions build read the
+    subscriptions table on a replica that had not fetched partition 202610 yet and
+    silently lost every October subscription).
+    """
+    cfg = get_config(config)
+    execute_sql_modify(f"SYSTEM SYNC REPLICA ON CLUSTER {cfg.cluster} {table_name}")
+
+
+def _subscription_source_rows_by_month(
+    table_name: str,
+    date_start: datetime.date,
+    date_end: datetime.date,
+) -> dict[int, int]:
+    query = f"""
+        select
+            toYYYYMM(toDate(`subscribed_dt`)) as `year_month`,
+            count() as `rows_cnt`
+        from {table_name}
+        where toDate(`subscribed_dt`) between toDate('{date_start}') and toDate('{date_end}')
+        group by `year_month`
+    """
+    df = execute_sql(query)
+    return {int(row["year_month"]): int(row["rows_cnt"]) for _, row in df.iterrows()}
+
+
+def _subscription_source_mismatches(
+    date_start: datetime.date,
+    date_end: datetime.date,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> dict[int, tuple[int, int]]:
+    """Months where ``subscriptions_transactions`` does not hold one row per subscription.
+
+    The transactions build emits exactly one row per subscription of the block, so
+    any difference means the build read an incomplete subscriptions table.
+    Returns ``{year_month: (subscriptions_rows, transactions_rows)}``.
+    """
+    cfg = get_config(config)
+    subscriptions_rows = _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end)
+    transactions_rows = _subscription_source_rows_by_month(cfg.subscription_transactions_table, date_start, date_end)
+    return {
+        year_month: (subscriptions_rows.get(year_month, 0), transactions_rows.get(year_month, 0))
+        for year_month in sorted(set(subscriptions_rows) | set(transactions_rows))
+        if subscriptions_rows.get(year_month, 0) != transactions_rows.get(year_month, 0)
+    }
 
 
 def _ensure_updated_at_column(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
@@ -2468,16 +2531,25 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
     if date_start > date_end:
         return
 
+    date_start, date_end = _month_date_range(date_start, date_end)
+
+    # The incremental range always spans the 45-day lookback, so the skip has to
+    # look at the whole range: every calculation used to rebuild ~3 months of both
+    # tables (20+ times a day), and each rebuild was another chance to hit the
+    # replica race below.
     if (
         not needs_full_refresh
-        and date_start == date_end
-        and _was_subscription_day_updated_recently(cfg.subscriptions_table, date_start)
-        and _was_subscription_day_updated_recently(cfg.subscription_transactions_table, date_start)
+        and _was_subscription_range_updated_recently(cfg.subscriptions_table, date_start, date_end)
+        and _was_subscription_range_updated_recently(cfg.subscription_transactions_table, date_start, date_end)
+        and not _subscription_source_mismatches(date_start, date_end, config=cfg)
     ):
-        logger.info("Skipping subscription source tables update for %s: updated less than 1 hour ago", date_start)
+        logger.info(
+            "Skipping subscription source tables update for %s - %s: rebuilt less than %s ago and consistent",
+            date_start,
+            date_end,
+            SUBSCRIPTION_SOURCE_FRESHNESS,
+        )
         return
-
-    date_start, date_end = _month_date_range(date_start, date_end)
 
     for block_start, block_end in _iter_half_year_blocks(date_start, date_end):
         logger.info("Updating subscription source tables for %s - %s", block_start, block_end)
@@ -2495,6 +2567,8 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
             config=cfg,
         )
         execute_sql_modify(f"insert into {cfg.subscriptions_table}\n{subscriptions_query}")
+        # The transactions build reads the subscriptions table: it must see every part just inserted.
+        _sync_table_replicas(cfg.subscriptions_table, config=cfg)
 
         transactions_query = get_query(
             "subscription_transactions_store_by_sub_date",
@@ -2506,7 +2580,30 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
             },
             config=cfg,
         )
-        execute_sql_modify(f"insert into {cfg.subscription_transactions_table}\n{transactions_query}")
+        for attempt in range(1, SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS + 1):
+            execute_sql_modify(f"insert into {cfg.subscription_transactions_table}\n{transactions_query}")
+            _sync_table_replicas(cfg.subscription_transactions_table, config=cfg)
+
+            mismatches = _subscription_source_mismatches(block_start, block_end, config=cfg)
+            if not mismatches:
+                break
+
+            logger.warning(
+                "Subscription transactions for %s - %s do not match subscriptions (attempt %s/%s): %s",
+                block_start,
+                block_end,
+                attempt,
+                SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS,
+                mismatches,
+            )
+            if attempt == SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS:
+                raise RuntimeError(
+                    "subscriptions_transactions is inconsistent with subscriptions after "
+                    f"{SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS} attempts for {block_start} - {block_end}: "
+                    f"{{year_month: (subscriptions_rows, transactions_rows)}} = {mismatches}"
+                )
+            _delete_subscriptions_block(cfg.subscription_transactions_table, block_start, block_end, config=cfg)
+            _sync_table_replicas(cfg.subscriptions_table, config=cfg)
 
 
 def _create_bandit_experiment_users_table(
