@@ -1264,9 +1264,9 @@ def _experiment_users_query_filters(exp_info: dict, segment: dict) -> tuple[str,
     having_filter = segment.get("uhf", "1")
     pro_rights = generate_sql_rights_filter("pro", segment.get("pro_rights", "all").lower())
     edu_rights = generate_sql_rights_filter("edu", segment.get("edu_rights", "all").lower())
-    sing_rights = generate_sql_rights_filter("edu", segment.get("sing_rights", "all").lower())
-    practice_rights = generate_sql_rights_filter("edu", segment.get("practice_rights", "all").lower())
-    book_rights = generate_sql_rights_filter("edu", segment.get("book_rights", "all").lower())
+    sing_rights = generate_sql_rights_filter("sing", segment.get("sing_rights", "all").lower())
+    practice_rights = generate_sql_rights_filter("practice", segment.get("practice_rights", "all").lower())
+    book_rights = generate_sql_rights_filter("book", segment.get("book_rights", "all").lower())
     having_filter += f" and ({pro_rights} and {edu_rights} and {sing_rights} and {practice_rights} and {book_rights})"
     return where_filter, having_filter
 
