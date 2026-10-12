@@ -35,6 +35,10 @@ SUBSCRIPTION_SOURCE_FRESHNESS = datetime.timedelta(hours=1)
 SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS = 2
 SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
 EXPERIMENT_USERS_CACHE_VERSION = 6
+# Bumped separately so only mobweb users caches are rebuilt: before 0.19.5 the
+# mobweb stage tables were not replicated and cached days could miss users or
+# their app/install bridge (see _ensure_mobweb_stage_table).
+MOBWEB_EXPERIMENT_USERS_CACHE_VERSION = 1
 TRIAL_CONVERSION_MODEL_TABLE = "trial_conversion_model"
 EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS = {
     "updated_at": "DateTime",
@@ -1274,15 +1278,19 @@ def _experiment_users_query_filters(exp_info: dict, segment: dict) -> tuple[str,
 def _experiment_users_hash_config(exp_info: dict, client: str, segment: dict) -> dict:
     clients_options = _canonical_clients_options(exp_info.get("clients_options", ""))
     where_filter, having_filter = _experiment_users_query_filters(exp_info, segment)
-    return {
+    query_name = exp_raw_data_query_name(client, segment, clients_options=clients_options)
+    hash_config = {
         "cache_version": EXPERIMENT_USERS_CACHE_VERSION,
         "client": client,
         "source_client": source_client_for_calculation(client),
-        "query": exp_raw_data_query_name(client, segment, clients_options=clients_options),
+        "query": query_name,
         "where_sql": where_filter,
         "having_sql": having_filter,
         "date_start": int(exp_info.get("date_start", 0) or 0),
     }
+    if query_name.startswith("exp_raw_data_mobweb"):
+        hash_config["mobweb_cache_version"] = MOBWEB_EXPERIMENT_USERS_CACHE_VERSION
+    return hash_config
 
 
 def get_experiment_users_hash(exp_info: dict, client: str, segment: dict) -> str:
@@ -1462,43 +1470,23 @@ def _mobweb_stage_table_name(storage_id: str, stage: str) -> str:
     return f"exp_users_{storage_id}_mobweb_{_identifier_part(stage)}"
 
 
-def _recreate_mobweb_stage_table(
-    table_name: str,
-    query_name: str,
-    params: dict,
-    *,
-    schema: str,
-    partition: str,
-    sorting: str,
-    config: Optional[ExperimentCalculatorConfig] = None,
-    client=None,
-) -> str:
+def _table_engines(full_table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None, client=None) -> set[str]:
+    """Engines of ``full_table_name`` across every replica of the cluster."""
     cfg = get_config(config)
-    full_table_name = cfg.full_table(table_name)
-    drop_table(full_table_name, config=cfg, client=client)
-    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
-    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
-    _execute_sql_modify(query, client=client)
-    _insert_into_table_from_select(full_table_name, query_name, params, config=cfg, client=client)
-    return full_table_name
-
-
-def _create_mobweb_stage_table(
-    table_name: str,
-    *,
-    schema: str,
-    partition: str,
-    sorting: str,
-    config: Optional[ExperimentCalculatorConfig] = None,
-    client=None,
-) -> str:
-    cfg = get_config(config)
-    full_table_name = cfg.full_table(table_name)
-    drop_table(full_table_name, config=cfg, client=client)
-    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
-    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
-    _execute_sql_modify(query, client=client)
-    return full_table_name
+    database, physical_table = _database_and_physical_table(full_table_name, config=cfg)
+    query = f"""
+        select distinct
+            `engine`
+        from clusterAllReplicas('{cfg.cluster}', system.tables)
+        where
+            `database` = {_clickhouse_string_literal(database)}
+        and
+            `name` = {_clickhouse_string_literal(physical_table)}
+    """
+    if client is None:
+        return set(_df_string_values(execute_sql(query), "engine"))
+    result = client.query(query)
+    return {str(row[0]) for row in result.result_rows or []}
 
 
 def _ensure_mobweb_stage_table(
@@ -1510,14 +1498,27 @@ def _ensure_mobweb_stage_table(
     config: Optional[ExperimentCalculatorConfig] = None,
     client=None,
 ) -> str:
+    """Create or reuse a mobweb stage table as ``ReplicatedMergeTree``.
+
+    Each stage is written and then read by separate HTTP requests, and the load
+    balancer may route them to different nodes. A plain ``MergeTree`` keeps one
+    unrelated local table per node, so the next stage silently missed every day
+    written on the other node (2026-10-12: experiment 7613 kept 12 of 26 entry
+    days). Stage tables created that way by older versions are dropped and
+    recreated; they only hold per-day intermediates that are rebuilt on demand.
+    """
     cfg = get_config(config)
     full_table_name = cfg.full_table(table_name)
     if _table_exists(full_table_name, client=client):
-        _ensure_table_schema_columns(full_table_name, schema, config=cfg, client=client)
-        return full_table_name
+        engines = _table_engines(full_table_name, config=cfg, client=client)
+        if engines and all(engine.startswith("Replicated") for engine in engines):
+            _ensure_table_schema_columns(full_table_name, schema, config=cfg, client=client)
+            return full_table_name
+        logger.info("Recreating non-replicated mobweb stage table %s (engines: %s)", full_table_name, sorted(engines))
+        drop_table(full_table_name, config=cfg, client=client)
 
-    query = create_transient_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
-    logger.info("Creating transient table %s with query:\n%s", full_table_name, query)
+    query = create_table_sql(table_name, schema=schema, partition=partition, sorting=sorting, config=cfg)
+    logger.info("Creating mobweb stage table %s with query:\n%s", full_table_name, query)
     _execute_sql_modify(query, client=client)
     _wait_for_table_exists(full_table_name, client=client)
     return full_table_name
@@ -1711,6 +1712,7 @@ def _insert_mobweb_experiment_users_day(
             config=cfg,
             client=clickhouse_client,
         )
+        _sync_table_replicas(web_users_table, config=cfg, client=clickhouse_client)
 
         web_installs_params = common_params | {"web_users_table": web_users_table}
         web_installs_table = _ensure_mobweb_stage_table(
@@ -1729,6 +1731,7 @@ def _insert_mobweb_experiment_users_day(
             config=cfg,
             client=clickhouse_client,
         )
+        _sync_table_replicas(web_installs_table, config=cfg, client=clickhouse_client)
 
         app_users_table = _ensure_mobweb_stage_table(
             _mobweb_stage_table_name(storage_id, "app_users"),
@@ -1757,6 +1760,7 @@ def _insert_mobweb_experiment_users_day(
                 client=clickhouse_client,
             )
             app_date += datetime.timedelta(days=1)
+        _sync_table_replicas(app_users_table, config=cfg, client=clickhouse_client)
 
         final_params = common_params | {
             "web_users_table": web_users_table,
@@ -1768,6 +1772,7 @@ def _insert_mobweb_experiment_users_day(
         query += "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
         logger.info("Inserting final mobweb experiment users table with query:\n%s", query)
         _execute_sql_modify(query, client=clickhouse_client)
+        _sync_table_replicas(full_table_name, config=cfg, client=clickhouse_client)
     finally:
         clickhouse_client.close()
 
@@ -2222,7 +2227,7 @@ def _was_subscription_range_updated_recently(
     return oldest_updated_at >= datetime.datetime.now(datetime.timezone.utc) - SUBSCRIPTION_SOURCE_FRESHNESS
 
 
-def _sync_table_replicas(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+def _sync_table_replicas(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None, client=None) -> None:
     """Wait until every replica of ``table_name`` has fetched all inserted parts.
 
     Writes land on whichever replica the load balancer picks, and the next query
@@ -2232,7 +2237,7 @@ def _sync_table_replicas(table_name: str, *, config: Optional[ExperimentCalculat
     silently lost every October subscription).
     """
     cfg = get_config(config)
-    execute_sql_modify(f"SYSTEM SYNC REPLICA ON CLUSTER {cfg.cluster} {table_name}")
+    _execute_sql_modify(f"SYSTEM SYNC REPLICA ON CLUSTER {cfg.cluster} {table_name}", client=client)
 
 
 def _subscription_source_rows_by_month(
@@ -2672,6 +2677,7 @@ def _create_bandit_experiment_users_table(
     )
     logger.info("Inserting bandit experiment users with query:\n%s", query)
     execute_sql_modify(query)
+    _sync_table_replicas(full_table_name, config=cfg)
 
     return full_table_name
 
@@ -2787,6 +2793,8 @@ def create_experiment_users_table(
         query = query_part_1 + "\n" + _wrap_exp_users_query(query_part_2, client, segment_name, segment_hash)
         logger.info("Inserting experiment users table with query:\n%s", query)
         execute_sql_modify(query)
+        # The next day's insert and every metric query read this table back.
+        _sync_table_replicas(full_table_name, config=cfg)
 
     return full_table_name
 
@@ -2850,6 +2858,8 @@ def create_experiment_users_slice_segments(
         )
         derived_segments.append((derived_segment_name, derived_segment, derived_segment_hash))
 
+    if derived_segments:
+        _sync_table_replicas(exp_users_table, config=cfg)
     return derived_segments
 
 
@@ -3220,6 +3230,7 @@ def create_results_table(table_name: str, df: pd.DataFrame, *, config: Optional[
     logger.info("Creating experiment results table with query:\n%s", query)
     execute_sql_modify(query)
     insert_df_by_chunks(cfg.full_table(table_name), df)
+    _sync_table_replicas(cfg.full_table(table_name), config=cfg)
 
 
 def create_exp_results_table(df: pd.DataFrame, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
@@ -3279,6 +3290,8 @@ def update_exp_results_table(df: pd.DataFrame, table: str, *, config: Optional[E
     ensure_table_columns(table, EXPERIMENT_OUTPUT_UPDATED_AT_COLUMNS, config=cfg)
     df = with_output_updated_at(df)
     insert_df_by_chunks(cfg.full_table(table), df)
+    # Report getters read the results right after the calculation, possibly on another replica.
+    _sync_table_replicas(cfg.full_table(table), config=cfg)
 
 
 def clear_exp_temp_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> None:

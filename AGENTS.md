@@ -116,6 +116,8 @@ For `UG_WEB`, use helpers from `repository.py` instead of hand-rolling client lo
 - `is_mobweb_segment`
 - `web_event_platform_filter_sql`
 
+Every table one request writes and a later request reads must be `ReplicatedMergeTree` and synced (`_sync_table_replicas`) before the read: writes and reads go through the load balancer and can land on different nodes. This covers the mobweb stage tables (`exp_users_{id}_mobweb_web_users` / `_web_installs` / `_app_users`), every day of `exp_users_{id}` (the next day's insert dedupes against it), slice segments, and the result tables. `_ensure_mobweb_stage_table` drops and recreates a stage table that is still plain `MergeTree`; `MOBWEB_EXPERIMENT_USERS_CACHE_VERSION` is part of the mobweb `segment_hash`, so bumping it rebuilds only mobweb users caches (2026-10-12: experiment 7613 kept 12 of 26 entry days because the stage tables were per-node `MergeTree`). The only remaining `create_transient_table_sql` user is `exp_subscription_*`, which is safe because `create ... on cluster ... as select` fills every node's copy itself.
+
 ## Monetization Contracts
 
 `get_monetization_metrics(exp_info, exp_users_table, subscription_table, client, segment_name, segment_hash="", ...)` is a low-level SQL runner.
@@ -205,5 +207,6 @@ After editing:
 - Trial charges missing across a month boundary: check source refresh lookback and whether `subscriptions_transactions` was refreshed for the subscription month.
 - Duplicate or stale users: check `segment_hash`, launch window dates, and whether the client was removed during the experiment.
 - Unexpected web/mobweb split: inspect `clients_options`, segment `platform`, and `expand_experiment_clients(...)`.
+- Mobweb members several times too low, only some entry days present, and `select hostName(), count()` differs per node on a stage table: a stage table is plain `MergeTree`; it must be `ReplicatedMergeTree` (recreated automatically since 0.19.5).
 - Product metrics too slow for mobweb: check sampling settings and avoid disabling mobweb product sampling without a clear reason.
 
