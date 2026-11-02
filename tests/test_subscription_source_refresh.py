@@ -1,6 +1,9 @@
 import datetime
 import unittest
+from typing import Optional
 from unittest import mock
+
+import pandas as pd
 
 from ug_experiment_calculator import repository
 from ug_experiment_calculator.config import ExperimentCalculatorConfig
@@ -28,6 +31,7 @@ class UpdateSubscriptionSourceTablesTest(unittest.TestCase):
             "_replace_partition": mock.Mock(side_effect=lambda target, ym, source, **k: self.calls.append(f"replace {self._name(target)} from {self._name(source)}")),
             "_subscription_source_rows_by_month": mock.Mock(side_effect=self._rows_by_month),
             "_subscription_source_mismatches": mock.Mock(side_effect=lambda *a, **k: self.mismatches.pop(0) if self.mismatches else {}),
+            "_subscribed_event_months": mock.Mock(side_effect=lambda start, end: set(repository._iter_year_months(start, end))),
             "drop_table": mock.Mock(side_effect=lambda table, **k: self.calls.append(f"drop table {self._name(table)}")),
             "execute_sql_modify": mock.Mock(side_effect=self._record_insert),
             "get_query": mock.Mock(side_effect=lambda name, params, **k: name),
@@ -148,18 +152,49 @@ class EnsureSubscriptionSourceCoversTest(unittest.TestCase):
         self.cfg = ExperimentCalculatorConfig.from_env()
         self.today = datetime.datetime.now(datetime.timezone.utc).date()
 
-    def _check(self, rows: dict[int, int], date_start: datetime.date) -> None:
-        with mock.patch.object(repository, "_subscription_source_rows_by_month", return_value=rows):
+    def _check(self, rows: dict[int, int], date_start: datetime.date, event_months: Optional[set[int]] = None) -> None:
+        if event_months is None:
+            event_months = set(repository._iter_year_months(date_start, self.today))
+        with mock.patch.object(repository, "_subscription_source_rows_by_month", return_value=rows), \
+             mock.patch.object(repository, "_subscribed_event_months", return_value=event_months):
             repository.ensure_subscription_source_covers(date_start, self.today, config=self.cfg)
 
+    def _previous_month_start(self) -> datetime.date:
+        return (self.today.replace(day=1) - datetime.timedelta(days=1)).replace(day=1)
+
     def test_raises_on_a_missing_finished_month(self) -> None:
-        previous_month = self.today.replace(day=1) - datetime.timedelta(days=1)
         rows = {self.today.year * 100 + self.today.month: 10}
         with self.assertRaisesRegex(RuntimeError, "no subscriptions"):
-            self._check(rows, previous_month.replace(day=1))
+            self._check(rows, self._previous_month_start())
+
+    def test_a_month_without_subscribed_events_is_not_a_gap(self) -> None:
+        current_month = self.today.year * 100 + self.today.month
+        self._check({current_month: 10}, self._previous_month_start(), event_months={current_month})
 
     def test_an_empty_current_month_is_allowed(self) -> None:
         self._check({}, self.today.replace(day=1))
+
+
+class EnsureTrialColumnTypeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.cfg = ExperimentCalculatorConfig.from_env()
+
+    def _ensure(self, column_type: str) -> tuple[bool, mock.Mock]:
+        modify = mock.Mock()
+        with mock.patch.object(repository, "execute_sql", return_value=pd.DataFrame({"column_type": [column_type]})), \
+             mock.patch.object(repository, "execute_sql_modify", modify):
+            changed = repository._ensure_trial_column_type(self.cfg.subscriptions_table, config=self.cfg)
+        return changed, modify
+
+    def test_uint8_trial_is_widened_and_forces_a_full_refresh(self) -> None:
+        changed, modify = self._ensure("UInt8")
+        self.assertTrue(changed)
+        self.assertIn("modify column `trial` UInt16", modify.call_args.args[0])
+
+    def test_uint16_trial_is_left_alone(self) -> None:
+        changed, modify = self._ensure("UInt16")
+        self.assertFalse(changed)
+        modify.assert_not_called()
 
 
 if __name__ == "__main__":

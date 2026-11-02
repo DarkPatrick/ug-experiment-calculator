@@ -30,7 +30,8 @@ from .config import ExperimentCalculatorConfig
 
 
 logger = logging.getLogger(__name__)
-SUBSCRIPTION_SOURCE_VERSION = 10
+# 11: trial widened to UInt16, every row rebuilt so values over 255 are recomputed.
+SUBSCRIPTION_SOURCE_VERSION = 11
 SUBSCRIPTION_SOURCE_FRESHNESS = datetime.timedelta(hours=1)
 SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS = 2
 SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
@@ -2236,9 +2237,13 @@ def _sync_table_replicas(table_name: str, *, config: Optional[ExperimentCalculat
     can miss whole partitions (2026-10-07: the transactions build read the
     subscriptions table on a replica that had not fetched partition 202610 yet and
     silently lost every October subscription).
+
+    LIGHTWEIGHT waits only for fetched, attached, dropped and replaced parts —
+    all a read-back needs. A full sync also waits for queued merges and
+    mutations and hung for minutes behind a postponed `MODIFY COLUMN` (2026-11-02).
     """
     cfg = get_config(config)
-    _execute_sql_modify(f"SYSTEM SYNC REPLICA ON CLUSTER {cfg.cluster} {table_name}", client=client)
+    _execute_sql_modify(f"SYSTEM SYNC REPLICA ON CLUSTER {cfg.cluster} {table_name} LIGHTWEIGHT", client=client)
 
 
 def _subscription_source_rows_by_month(
@@ -2320,6 +2325,35 @@ def _ensure_payment_account_id_vector_column(table_name: str, *, config: Optiona
         add column if not exists `payment_account_id_vector` Array(UInt32) default [] after `payment_account_id`
     """
     execute_sql_modify(query)
+    return True
+
+
+def _ensure_trial_column_type(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
+    """Widen `trial` to UInt16 and ask for a full refresh: a UInt8 column stored
+    every trial longer than 255 days modulo 256 (365 -> 109, 256 -> 0)."""
+    cfg = get_config(config)
+    database, short_table_name = table_name.split(".", 1)
+    df = execute_sql(
+        f"""
+        select `type` as `column_type`
+        from system.columns
+        where `database` = {_clickhouse_string_literal(database)}
+        and `table` = {_clickhouse_string_literal(short_table_name)}
+        and `name` = 'trial'
+        """
+    )
+    if df.empty or df["column_type"].iloc[0] != "UInt8":
+        return False
+
+    logger.info("Widening %s.trial from UInt8 to UInt16", table_name)
+    execute_sql_modify(
+        f"""
+        alter table {table_name}
+        on cluster {cfg.cluster}
+        modify column `trial` UInt16
+        settings mutations_sync = 2
+        """
+    )
     return True
 
 
@@ -2427,6 +2461,7 @@ def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorC
         needs_full_refresh = _ensure_next_subscribed_dt_column(cfg.subscriptions_table, config=cfg)
         needs_full_refresh = _ensure_payment_account_id_vector_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_is_access_intro_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
+        needs_full_refresh = _ensure_trial_column_type(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_subscription_event_detail_columns(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _ensure_source_version_column(cfg.subscriptions_table, config=cfg) or needs_full_refresh
         needs_full_refresh = _has_stale_source_version(cfg.subscriptions_table, config=cfg) or needs_full_refresh
@@ -2536,7 +2571,7 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
         and _was_subscription_range_updated_recently(cfg.subscriptions_table, date_start, date_end)
         and _was_subscription_range_updated_recently(cfg.subscription_transactions_table, date_start, date_end)
         and not _subscription_source_mismatches(date_start, date_end, config=cfg)
-        and not _missing_finished_months(
+        and not _subscription_source_gaps(
             date_start,
             date_end,
             _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end),
@@ -2685,10 +2720,10 @@ def _rebuild_subscription_source_block(
         _truncate_table(staging_transactions, config=cfg)
         _sync_table_replicas(staging_subscriptions, config=cfg)
 
-    # A finished month never has zero subscriptions: an empty build is a broken
-    # build, and swapping it in would erase the month just like the old drop did.
+    # A month with Subscribed events but no built rows is a broken build, and
+    # swapping it in would erase the month just like the old drop did.
     staged_rows = _subscription_source_rows_by_month(staging_subscriptions, block_start, block_end)
-    empty_months = _missing_finished_months(block_start, block_end, staged_rows)
+    empty_months = _subscription_source_gaps(block_start, block_end, staged_rows)
     if empty_months:
         raise RuntimeError(
             f"Subscription source build for {block_start} - {block_end} produced no rows for {empty_months}; "
@@ -2704,19 +2739,38 @@ def _rebuild_subscription_source_block(
     _sync_table_replicas(cfg.subscription_transactions_table, config=cfg)
 
 
-def _missing_finished_months(
+def _subscribed_event_months(date_start: datetime.date, date_end: datetime.date) -> set[int]:
+    query = f"""
+        select distinct toYYYYMM(`use`.`date`) as `year_month`
+        from `default`.`ug_subscriptions_events` as `use`
+        where `use`.`date` between toDate('{date_start}') and toDate('{date_end}')
+        and `use`.`event` = 'Subscribed'
+    """
+    return {int(year_month) for year_month in execute_sql(query)["year_month"]}
+
+
+def _subscription_source_gaps(
     date_start: datetime.date,
     date_end: datetime.date,
     rows_by_month: dict[int, int],
 ) -> list[int]:
-    """Months of the range, except the current one, that hold no rows."""
+    """Finished months of the range that have Subscribed events but no rows.
+
+    Months without any Subscribed event are not gaps: the event log itself has
+    holes (2017-02, 2017-03, 2017-07..09, 2017-11). The current month is
+    skipped because it is still filling up.
+    """
     today = datetime.datetime.now(datetime.timezone.utc).date()
     current_month = today.year * 100 + today.month
-    return [
+    empty_months = [
         year_month
         for year_month in _iter_year_months(date_start, date_end)
         if year_month != current_month and not rows_by_month.get(year_month)
     ]
+    if not empty_months:
+        return []
+    event_months = _subscribed_event_months(date_start, date_end)
+    return [year_month for year_month in empty_months if year_month in event_months]
 
 
 def ensure_subscription_source_covers(
@@ -2733,7 +2787,7 @@ def ensure_subscription_source_covers(
     cfg = get_config(config)
     date_start = max(date_start, cfg.subscriptions_start_date)
     rows_by_month = _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end)
-    missing_months = _missing_finished_months(date_start, date_end, rows_by_month)
+    missing_months = _subscription_source_gaps(date_start, date_end, rows_by_month)
     if missing_months:
         raise RuntimeError(
             f"{cfg.subscriptions_table} has no subscriptions for {missing_months}: "
