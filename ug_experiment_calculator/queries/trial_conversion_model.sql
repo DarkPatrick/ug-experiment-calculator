@@ -16,22 +16,22 @@ with
                 ) as `sub_key`,
                 minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `subscribed_dt`,
                 minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Charged') as `charge_dt`,
-                argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `product_code`,
-                argMinIf(`use`.`product_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `product_id`,
-                argMinIf(`use`.`platform`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `platform`,
-                argMinIf(`use`.`unified_id`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `unified_id`,
-                argMinIf(`use`.`service_name`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `service_name`,
-                argMinIf(`use`.`funnel_source`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `funnel_source`,
-                argMinIf(`use`.`duration_count`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `duration_count`,
-                argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `base_price`,
-                argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `country`,
+                argMinIf(`use`.`product_code`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `product_code`,
+                argMinIf(`use`.`product_id`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `product_id`,
+                argMinIf(`use`.`platform`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `platform`,
+                argMinIf(`use`.`unified_id`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `unified_id`,
+                argMinIf(`use`.`service_name`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `service_name`,
+                argMinIf(`use`.`funnel_source`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `funnel_source`,
+                argMinIf(`use`.`duration_count`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `duration_count`,
+                argMinIf(`use`.`base_price`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `base_price`,
+                argMinIf(`use`.`country`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')) as `country`,
                 argMinIf(
                     if(`use`.`datetime_next_billing` < `use`.`datetime`, toUnixTimestamp(`use`.`datetime`), toUnixTimestamp(`use`.`datetime_next_billing`)),
-                    `use`.`datetime`,
+                    `use`.`subscribed_pick_key`,
                     `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')
                 ) as `first_charge_expected_dt`,
                 greatest(
-                    argMinIf(`use`.`trial`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')),
+                    argMinIf(`use`.`trial`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `use`.`orig` = '')),
                     if(
                         toDate(`first_charge_expected_dt`) > toDate(`subscribed_dt`)
                         and toDate(`charge_dt`) != toDate(`subscribed_dt`),
@@ -52,6 +52,18 @@ with
             from (
                 select
                     *,
+                    -- Tie-break for argMinIf over Subscribed events: iOS sends two Subscribed events for
+                    -- one subscription in the same second with different accounts (one often with
+                    -- user_id = 0), and a datetime-only key picked either of them at random.
+                    tuple(
+                        `datetime`,
+                        `user_id` = 0,
+                        `payment_account_id`,
+                        cityHash64(
+                            `user_id`, `unified_id`, `payment_account_id_vector`, `product_code`, `product_id`, `platform`,
+                            `funnel_source`, `service_name`, `duration_count`, `trial`, `base_price`, `country`, `datetime_next_billing`
+                        )
+                    ) as `subscribed_pick_key`,
                     `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `orig`
                 from
                     `default`.`ug_subscriptions_events`

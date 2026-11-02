@@ -74,13 +74,25 @@ from (
                 `use`.`subscription_id`,
                 `original_subscription_id`
             ) as `subscription_id`,
-            argMinIf(`use`.`product_code`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `product_code`,
+            argMinIf(`use`.`product_code`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `product_code`,
             minIf(toUnixTimestamp(`use`.`datetime`), `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `subscribed_dt`,
-            argMinIf(`use`.`base_price`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `base_price`,
-            argMinIf(`use`.`country`, `use`.`datetime`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `country`
+            argMinIf(`use`.`base_price`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `base_price`,
+            argMinIf(`use`.`country`, `use`.`subscribed_pick_key`, `use`.`event` = 'Subscribed' and (lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '')) as `country`
         from (
             select
                 *,
+                -- Tie-break for argMinIf over Subscribed events: iOS sends two Subscribed events for
+                -- one subscription in the same second with different accounts (one often with
+                -- user_id = 0), and a datetime-only key picked either of them at random.
+                tuple(
+                    `datetime`,
+                    `user_id` = 0,
+                    `payment_account_id`,
+                    cityHash64(
+                        `user_id`, `unified_id`, `payment_account_id_vector`, `product_code`, `product_id`, `platform`,
+                        `funnel_source`, `service_name`, `duration_count`, `trial`, `base_price`, `country`, `datetime_next_billing`
+                    )
+                ) as `subscribed_pick_key`,
                 `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`
             from
                 `default`.`ug_subscriptions_events`
