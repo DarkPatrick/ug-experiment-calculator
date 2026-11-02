@@ -229,120 +229,10 @@ def _calculate_exp_segment_info(
     subscription_table = create_experiments_subscription_table(exp_info, client, segment, config=cfg)
     logger.info("exp_users_table=%s, subscription_table=%s", exp_users_table, subscription_table)
 
-    logger.info("Loading monetization metrics")
-    df = get_monetization_metrics(
-        exp_info,
-        exp_users_table,
-        subscription_table,
-        client,
-        segment_name,
-        segment_hash,
-        config=cfg,
-    )
-    retention_cache_key = (
-        client,
-        get_user_filters_hash(segment, client=client, clients_options=exp_info.get("clients_options", "")),
-    )
-    product_metrics_source_segment = product_metrics_segments.get(retention_cache_key)
-    include_product_metrics = product_metrics_source_segment is None
-    if include_product_metrics:
-        product_metrics_segments[retention_cache_key] = segment_name
-
-    if include_product_metrics and retention_cache_key not in retention_cache:
-        logger.info("Loading retention metrics")
-        retention_cache[retention_cache_key] = get_retention_metrics(
-            exp_users_table,
-            client,
-            segment_name,
-            segment_hash,
-            calculate_app_retention=(
-                base_client_for_calculation(client) != "UG_WEB"
-                or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
-            ),
-            segment=segment,
-            clients_options=exp_info.get("clients_options", ""),
-            config=cfg,
-        )
-    elif include_product_metrics:
-        logger.info(
-            "Reusing retention metrics for exp_id=%s, client=%s, segment=%s",
-            exp_id,
-            client,
-            segment_name,
-        )
-    else:
-        logger.info(
-            "Skipping retention metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
-            exp_id,
-            client,
-            segment_name,
-            product_metrics_source_segment,
-        )
-
-    if include_product_metrics:
-        df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
-
-    if include_product_metrics and retention_cache_key not in tab_view_cache:
-        logger.info("Loading tab view metrics")
-        tab_view_cache[retention_cache_key] = get_tab_view_metrics(
+    try:
+        logger.info("Loading monetization metrics")
+        df = get_monetization_metrics(
             exp_info,
-            exp_users_table,
-            client,
-            segment_name,
-            segment_hash,
-            calculate_app_tab_view=(
-                base_client_for_calculation(client) != "UG_WEB"
-                or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
-            ),
-            segment=segment,
-            clients_options=exp_info.get("clients_options", ""),
-            config=cfg,
-        )
-    elif include_product_metrics:
-        logger.info(
-            "Reusing tab view metrics for exp_id=%s, client=%s, segment=%s",
-            exp_id,
-            client,
-            segment_name,
-        )
-    else:
-        logger.info(
-            "Skipping tab view metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
-            exp_id,
-            client,
-            segment_name,
-            product_metrics_source_segment,
-        )
-
-    if include_product_metrics:
-        df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
-
-    is_bandit = is_bandit_exp_info(exp_info)
-    if is_bandit:
-        logger.info("Loading bandit banner funnel metrics")
-        bandit_funnel_df = get_bandit_funnel_metrics(
-            exp_info,
-            exp_users_table,
-            client,
-            segment_name,
-            segment_hash,
-            config=cfg,
-        )
-        df = _merge_metric_frame(df, bandit_funnel_df, BANDIT_FUNNEL_COLUMNS)
-
-    frame_key = (exp_launch_id, client, segment_name)
-    df_tot[frame_key] = df
-
-    logger.info("Loading subscription funnels")
-    funnel_parts = []
-    for funnel_definition_key, funnel_items in funnels_config.items():
-        funnel_config = normalize_funnel_config(funnel_items)
-        if not funnel_enabled_for_client(funnel_config, client):
-            continue
-
-        query_name = funnel_config.get("query", funnel_definition_key)
-        current_funnel_df = get_funnel_metrics(
-            query_name,
             exp_users_table,
             subscription_table,
             client,
@@ -350,61 +240,177 @@ def _calculate_exp_segment_info(
             segment_hash,
             config=cfg,
         )
-        if current_funnel_df.empty:
-            continue
+        retention_cache_key = (
+            client,
+            get_user_filters_hash(segment, client=client, clients_options=exp_info.get("clients_options", "")),
+        )
+        product_metrics_source_segment = product_metrics_segments.get(retention_cache_key)
+        include_product_metrics = product_metrics_source_segment is None
+        if include_product_metrics:
+            product_metrics_segments[retention_cache_key] = segment_name
 
-        current_funnel_df["funnel_definition_key"] = funnel_definition_key
-        current_funnel_df["funnel_definition_name"] = funnel_config.get("name", funnel_definition_key)
-        current_funnel_df["funnel_definition_description"] = funnel_config.get("description", "")
-        funnel_parts.append(current_funnel_df)
+        if include_product_metrics and retention_cache_key not in retention_cache:
+            logger.info("Loading retention metrics")
+            retention_cache[retention_cache_key] = get_retention_metrics(
+                exp_users_table,
+                client,
+                segment_name,
+                segment_hash,
+                calculate_app_retention=(
+                    base_client_for_calculation(client) != "UG_WEB"
+                    or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
+                ),
+                segment=segment,
+                clients_options=exp_info.get("clients_options", ""),
+                config=cfg,
+            )
+        elif include_product_metrics:
+            logger.info(
+                "Reusing retention metrics for exp_id=%s, client=%s, segment=%s",
+                exp_id,
+                client,
+                segment_name,
+            )
+        else:
+            logger.info(
+                "Skipping retention metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
+                exp_id,
+                client,
+                segment_name,
+                product_metrics_source_segment,
+            )
 
-    funnel_df = pd.concat(funnel_parts, ignore_index=True) if funnel_parts else pd.DataFrame()
+        if include_product_metrics:
+            df = _merge_retention_metrics(df, retention_cache[retention_cache_key])
 
-    logger.info("Calculating cumulative funnel aggregates")
-    funnel_cum_df = calc_cumulative_funnel_aggregates(funnel_df)
+        if include_product_metrics and retention_cache_key not in tab_view_cache:
+            logger.info("Loading tab view metrics")
+            tab_view_cache[retention_cache_key] = get_tab_view_metrics(
+                exp_info,
+                exp_users_table,
+                client,
+                segment_name,
+                segment_hash,
+                calculate_app_tab_view=(
+                    base_client_for_calculation(client) != "UG_WEB"
+                    or is_mobweb_segment(segment, exp_info.get("clients_options", ""), client)
+                ),
+                segment=segment,
+                clients_options=exp_info.get("clients_options", ""),
+                config=cfg,
+            )
+        elif include_product_metrics:
+            logger.info(
+                "Reusing tab view metrics for exp_id=%s, client=%s, segment=%s",
+                exp_id,
+                client,
+                segment_name,
+            )
+        else:
+            logger.info(
+                "Skipping tab view metrics for exp_id=%s, client=%s, segment=%s: product metrics already attached to segment=%s for the same user filters",
+                exp_id,
+                client,
+                segment_name,
+                product_metrics_source_segment,
+            )
 
-    logger.info("Calculating cumulative funnel statistics")
-    funnel_stats_df = calc_funnel_stats_by_variation_pairs(
-        cumulative_df=funnel_cum_df,
-        control_variation=1,
-    )
+        if include_product_metrics:
+            df = _merge_tab_view_metrics(df, tab_view_cache[retention_cache_key])
 
-    funnel_cum_df["exp_id"] = exp_id
-    funnel_cum_df["base_exp_id"] = base_exp_id
-    funnel_cum_df["exp_launch_id"] = exp_launch_id
-    funnel_cum_df["client"] = client
-    funnel_cum_df["segment"] = segment_name
-    funnel_stats_df["exp_id"] = exp_id
-    funnel_stats_df["base_exp_id"] = base_exp_id
-    funnel_stats_df["exp_launch_id"] = exp_launch_id
-    funnel_stats_df["client"] = client
-    funnel_stats_df["segment"] = segment_name
+        is_bandit = is_bandit_exp_info(exp_info)
+        if is_bandit:
+            logger.info("Loading bandit banner funnel metrics")
+            bandit_funnel_df = get_bandit_funnel_metrics(
+                exp_info,
+                exp_users_table,
+                client,
+                segment_name,
+                segment_hash,
+                config=cfg,
+            )
+            df = _merge_metric_frame(df, bandit_funnel_df, BANDIT_FUNNEL_COLUMNS)
 
-    _replace_exp_output_table(
-        funnel_cum_df,
-        exp_id=exp_id,
-        client=client,
-        segment_name=segment_name,
-        logical_table_name="ug_exp_funnel_stats",
-        full_table_name=cfg.exp_funnel_stats_table,
-        create_table_func=create_exp_funnel_stats_table,
-        required_columns=FUNNEL_DEFINITION_COLUMNS,
-        config=cfg,
-    )
-    _replace_exp_output_table(
-        funnel_stats_df,
-        exp_id=exp_id,
-        client=client,
-        segment_name=segment_name,
-        logical_table_name="ug_exp_funnel_results",
-        full_table_name=cfg.exp_funnel_results_table,
-        create_table_func=create_exp_funnel_results_table,
-        required_columns=FUNNEL_DEFINITION_COLUMNS,
-        config=cfg,
-    )
+        frame_key = (exp_launch_id, client, segment_name)
+        df_tot[frame_key] = df
 
-    logger.info("Deleting temporary subscription table")
-    drop_table(subscription_table, config=cfg)
+        logger.info("Loading subscription funnels")
+        funnel_parts = []
+        for funnel_definition_key, funnel_items in funnels_config.items():
+            funnel_config = normalize_funnel_config(funnel_items)
+            if not funnel_enabled_for_client(funnel_config, client):
+                continue
+
+            query_name = funnel_config.get("query", funnel_definition_key)
+            current_funnel_df = get_funnel_metrics(
+                query_name,
+                exp_users_table,
+                subscription_table,
+                client,
+                segment_name,
+                segment_hash,
+                config=cfg,
+            )
+            if current_funnel_df.empty:
+                continue
+
+            current_funnel_df["funnel_definition_key"] = funnel_definition_key
+            current_funnel_df["funnel_definition_name"] = funnel_config.get("name", funnel_definition_key)
+            current_funnel_df["funnel_definition_description"] = funnel_config.get("description", "")
+            funnel_parts.append(current_funnel_df)
+
+        funnel_df = pd.concat(funnel_parts, ignore_index=True) if funnel_parts else pd.DataFrame()
+
+        logger.info("Calculating cumulative funnel aggregates")
+        funnel_cum_df = calc_cumulative_funnel_aggregates(funnel_df)
+
+        logger.info("Calculating cumulative funnel statistics")
+        funnel_stats_df = calc_funnel_stats_by_variation_pairs(
+            cumulative_df=funnel_cum_df,
+            control_variation=1,
+        )
+
+        funnel_cum_df["exp_id"] = exp_id
+        funnel_cum_df["base_exp_id"] = base_exp_id
+        funnel_cum_df["exp_launch_id"] = exp_launch_id
+        funnel_cum_df["client"] = client
+        funnel_cum_df["segment"] = segment_name
+        funnel_stats_df["exp_id"] = exp_id
+        funnel_stats_df["base_exp_id"] = base_exp_id
+        funnel_stats_df["exp_launch_id"] = exp_launch_id
+        funnel_stats_df["client"] = client
+        funnel_stats_df["segment"] = segment_name
+
+        _replace_exp_output_table(
+            funnel_cum_df,
+            exp_id=exp_id,
+            client=client,
+            segment_name=segment_name,
+            logical_table_name="ug_exp_funnel_stats",
+            full_table_name=cfg.exp_funnel_stats_table,
+            create_table_func=create_exp_funnel_stats_table,
+            required_columns=FUNNEL_DEFINITION_COLUMNS,
+            config=cfg,
+        )
+        _replace_exp_output_table(
+            funnel_stats_df,
+            exp_id=exp_id,
+            client=client,
+            segment_name=segment_name,
+            logical_table_name="ug_exp_funnel_results",
+            full_table_name=cfg.exp_funnel_results_table,
+            create_table_func=create_exp_funnel_results_table,
+            required_columns=FUNNEL_DEFINITION_COLUMNS,
+            config=cfg,
+        )
+    finally:
+        # The temp table must not outlive a failed segment: a leftover per failure
+        # used to pile up in sandbox until someone cleaned it by hand.
+        logger.info("Deleting temporary subscription table")
+        try:
+            drop_table(subscription_table, config=cfg)
+        except Exception:
+            logger.exception("Failed to drop temporary subscription table %s", subscription_table)
 
     logger.info("Calculating cumulative aggregates")
     df_cum_agg = calc_cumulative_aggregates(df)

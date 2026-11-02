@@ -77,7 +77,7 @@ The normal `calculate_exp_info` flow is:
 12. Run enabled funnels.
 13. Calculate cumulative metric/stat/funnel values and pairwise `1 vs N` results.
 14. Drop only the target result partitions and insert fresh rows.
-15. Drop the temporary subscription table.
+15. Drop the temporary subscription table — in a `finally`, so a failed segment does not leave it behind (a failed `CREATE ... AS SELECT` drops its partial table too).
 16. Update rollout tables for the latest launch when `update_rollout=True`.
 
 ## Source Subscription Refresh

@@ -3003,7 +3003,15 @@ def create_experiments_subscription_table(
         config=cfg,
     )
     query = query_part_1 + "\n as \n" + query_part_2
-    execute_sql_modify(query)
+    try:
+        execute_sql_modify(query)
+    except Exception:
+        # A CREATE ... AS SELECT that fails mid-insert can still leave the table behind.
+        try:
+            drop_table(cfg.full_table(table_name), config=cfg)
+        except Exception:
+            logger.exception("Failed to drop temporary subscription table %s", cfg.full_table(table_name))
+        raise
 
     return cfg.full_table(table_name)
 
