@@ -74,6 +74,9 @@ from (
             `default`.`ug_subscriptions_events`
         where
             `event` in ('Charged', 'Canceled', 'Refunded', 'Crossgrade', 'Upgrade', 'Downgrade')
+        -- Only events at or after subscribed_dt are attributed, so nothing before the block is needed.
+        and
+            `date` >= date_start - interval 1 day
     ) as `use`
     on
         if(

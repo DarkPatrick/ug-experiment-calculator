@@ -106,9 +106,38 @@ from (
                 `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`
             from
                 `default`.`ug_subscriptions_events`
+            where
+                `date` >= date_start - interval 1 day
         ) as `use`
         where
             `use`.`event` in ('Subscribed', 'Charged')
+        and (
+            -- Rows are per subscription and day, so a block needs only its own days, plus the
+            -- later Subscribed events of its subscriptions for next_subscribed_dt. Aggregating
+            -- the whole history per block outgrew the 35 GiB query memory limit on 2026-11-01.
+            `use`.`date` <= date_end + interval 1 day
+            or (
+                `use`.`event` = 'Subscribed'
+                and if(
+                    lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',
+                    `use`.`subscription_id`,
+                    `original_subscription_id`
+                ) in (
+                    select
+                        if(
+                            lower(`blk`.`platform`) like '%ios%' or `blk`.`params.str_value`[indexOf(`blk`.`params.key`, 'original_subscription_id')] = '',
+                            `blk`.`subscription_id`,
+                            `blk`.`params.str_value`[indexOf(`blk`.`params.key`, 'original_subscription_id')]
+                        ) as `block_subscription_id`
+                    from
+                        `default`.`ug_subscriptions_events` as `blk`
+                    where
+                        `blk`.`date` between date_start - interval 1 day and date_end + interval 1 day
+                    and
+                        `blk`.`event` = 'Subscribed'
+                )
+            )
+        )
         group by
             if(
                 lower(`use`.`platform`) like '%ios%' or `original_subscription_id` = '',

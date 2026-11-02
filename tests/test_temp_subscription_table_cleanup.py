@@ -61,6 +61,7 @@ class CreateTempTableCleanupTest(unittest.TestCase):
         cfg = ExperimentCalculatorConfig.from_env()
         drop_table = mock.Mock()
         with mock.patch.object(repository, "_ensure_subscription_source_tables"), \
+             mock.patch.object(repository, "ensure_subscription_source_covers"), \
              mock.patch.object(repository, "create_transient_table_sql", return_value="create table t"), \
              mock.patch.object(repository, "get_query", return_value="select 1"), \
              mock.patch.object(repository, "execute_sql_modify", side_effect=RuntimeError("Memory limit exceeded")), \

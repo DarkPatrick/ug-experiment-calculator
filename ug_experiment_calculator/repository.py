@@ -34,6 +34,7 @@ SUBSCRIPTION_SOURCE_VERSION = 10
 SUBSCRIPTION_SOURCE_FRESHNESS = datetime.timedelta(hours=1)
 SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS = 2
 SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
+SUBSCRIPTION_SOURCE_BLOCK_MONTHS = 6
 EXPERIMENT_USERS_CACHE_VERSION = 6
 # Bumped separately so only mobweb users caches are rebuilt: before 0.19.5 the
 # mobweb stage tables were not replicated and cached days could miss users or
@@ -1820,10 +1821,10 @@ def _add_months(source_date: datetime.date, months: int) -> datetime.date:
     return datetime.date(year, month, day)
 
 
-def _iter_half_year_blocks(date_start: datetime.date, date_end: datetime.date):
+def _iter_month_blocks(date_start: datetime.date, date_end: datetime.date, months: int):
     block_start = date_start
     while block_start <= date_end:
-        next_block_start = _add_months(block_start, 6)
+        next_block_start = _add_months(block_start, months)
         block_end = min(next_block_start - datetime.timedelta(days=1), date_end)
         yield block_start, block_end
         block_start = next_block_start
@@ -2261,6 +2262,8 @@ def _subscription_source_mismatches(
     date_start: datetime.date,
     date_end: datetime.date,
     *,
+    subscriptions_table: Optional[str] = None,
+    transactions_table: Optional[str] = None,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> dict[int, tuple[int, int]]:
     """Months where ``subscriptions_transactions`` does not hold one row per subscription.
@@ -2270,8 +2273,8 @@ def _subscription_source_mismatches(
     Returns ``{year_month: (subscriptions_rows, transactions_rows)}``.
     """
     cfg = get_config(config)
-    subscriptions_rows = _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end)
-    transactions_rows = _subscription_source_rows_by_month(cfg.subscription_transactions_table, date_start, date_end)
+    subscriptions_rows = _subscription_source_rows_by_month(subscriptions_table or cfg.subscriptions_table, date_start, date_end)
+    transactions_rows = _subscription_source_rows_by_month(transactions_table or cfg.subscription_transactions_table, date_start, date_end)
     return {
         year_month: (subscriptions_rows.get(year_month, 0), transactions_rows.get(year_month, 0))
         for year_month in sorted(set(subscriptions_rows) | set(transactions_rows))
@@ -2399,20 +2402,6 @@ def _create_table_from_select(
     query = create_query + "\n as \n select * from (\n" + select_query + "\n) where 0"
     logger.info("Creating table %s with query:\n%s", cfg.full_table(table_name), query)
     execute_sql_modify(query)
-
-
-def _delete_subscriptions_block(table_name: str, block_start: datetime.date, block_end: datetime.date, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
-    cfg = get_config(config)
-    year_months = list(_iter_year_months(block_start, block_end))
-    if not year_months:
-        return
-
-    logger.info("Dropping subscriptions partitions from %s for %s - %s", table_name, block_start, block_end)
-    _drop_active_partitions(
-        table_name,
-        f"`partition` in ({', '.join(_clickhouse_string_literal(str(year_month)) for year_month in year_months)})",
-        config=cfg,
-    )
 
 
 def _ensure_subscription_source_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> bool:
@@ -2547,6 +2536,11 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
         and _was_subscription_range_updated_recently(cfg.subscriptions_table, date_start, date_end)
         and _was_subscription_range_updated_recently(cfg.subscription_transactions_table, date_start, date_end)
         and not _subscription_source_mismatches(date_start, date_end, config=cfg)
+        and not _missing_finished_months(
+            date_start,
+            date_end,
+            _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end),
+        )
     ):
         logger.info(
             "Skipping subscription source tables update for %s - %s: rebuilt less than %s ago and consistent",
@@ -2556,59 +2550,195 @@ def update_subscription_source_tables(*, config: Optional[ExperimentCalculatorCo
         )
         return
 
-    for block_start, block_end in _iter_half_year_blocks(date_start, date_end):
-        logger.info("Updating subscription source tables for %s - %s", block_start, block_end)
+    # Blocks are built into staging tables and swapped in partition by partition, so
+    # a failed build leaves the live partitions untouched. Dropping them before the
+    # insert (the old way) wiped twelve months on 2026-11-01, when every insert hit
+    # the 35 GiB query memory limit, and the next night's results came out as zeros.
+    # (The memory blow-up itself was the subscriptions query aggregating the whole
+    # event history for every block, now bounded by the block dates.)
+    staging = _create_subscription_staging_tables(config=cfg)
+    try:
+        for block_start, block_end in _iter_month_blocks(date_start, date_end, SUBSCRIPTION_SOURCE_BLOCK_MONTHS):
+            _rebuild_subscription_source_block(block_start, block_end, staging, config=cfg)
+    finally:
+        for staging_table in staging.values():
+            try:
+                drop_table(staging_table, config=cfg)
+            except Exception:
+                logger.exception("Failed to drop subscription staging table %s", staging_table)
 
-        _delete_subscriptions_block(cfg.subscription_transactions_table, block_start, block_end, config=cfg)
-        _delete_subscriptions_block(cfg.subscriptions_table, block_start, block_end, config=cfg)
 
-        subscriptions_query = get_query(
-            "subscriptions_store_by_sub_date",
-            {
-                "date_start": block_start.strftime("%Y-%m-%d"),
-                "date_end": block_end.strftime("%Y-%m-%d"),
-                "source_version": SUBSCRIPTION_SOURCE_VERSION,
-            },
+def _create_subscription_staging_tables(*, config: Optional[ExperimentCalculatorConfig] = None) -> dict[str, str]:
+    """Empty replicated copies of both source tables, private to this refresh.
+
+    Replicated, so the swap sees the same parts whichever replica runs it, and
+    named per refresh, so concurrent calculations never share a staging table.
+    """
+    cfg = get_config(config)
+    session_id = generate_random_id(12)
+    staging = {}
+    for logical_name, target_table in [
+        ("subscriptions", cfg.subscriptions_table),
+        ("subscriptions_transactions", cfg.subscription_transactions_table),
+    ]:
+        staging_logical_name = f"{logical_name}_staging_{session_id}"
+        database, physical_table = _database_and_physical_table(target_table, config=cfg)
+        keys = execute_sql(
+            f"""
+            select `partition_key`, `sorting_key`
+            from system.tables
+            where `database` = {_clickhouse_string_literal(database)}
+            and `name` = {_clickhouse_string_literal(physical_table)}
+            """
+        )
+        staging_table = cfg.full_table(staging_logical_name)
+        execute_sql_modify(
+            f"""
+            create table {staging_table} on cluster {cfg.cluster}
+            as {target_table}
+            engine = ReplicatedMergeTree('{cfg.zookeeper_path(staging_logical_name)}', '{{replica}}')
+            partition by {keys["partition_key"].iloc[0]}
+            order by ({keys["sorting_key"].iloc[0]})
+            """
+        )
+        staging[logical_name] = staging_table
+    return staging
+
+
+def _truncate_table(table_name: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    execute_sql_modify(f"truncate table {table_name} on cluster {cfg.cluster}")
+
+
+def _replace_partition(target_table: str, year_month: int, source_table: str, *, config: Optional[ExperimentCalculatorConfig] = None) -> None:
+    cfg = get_config(config)
+    logger.info("Replacing partition %s of %s from %s", year_month, target_table, source_table)
+    execute_sql_modify(f"alter table {target_table} on cluster {cfg.cluster} replace partition {year_month} from {source_table}")
+
+
+def _rebuild_subscription_source_block(
+    block_start: datetime.date,
+    block_end: datetime.date,
+    staging: dict[str, str],
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    cfg = get_config(config)
+    staging_subscriptions = staging["subscriptions"]
+    staging_transactions = staging["subscriptions_transactions"]
+    logger.info("Updating subscription source tables for %s - %s", block_start, block_end)
+
+    _truncate_table(staging_subscriptions, config=cfg)
+    _truncate_table(staging_transactions, config=cfg)
+
+    subscriptions_query = get_query(
+        "subscriptions_store_by_sub_date",
+        {
+            "date_start": block_start.strftime("%Y-%m-%d"),
+            "date_end": block_end.strftime("%Y-%m-%d"),
+            "source_version": SUBSCRIPTION_SOURCE_VERSION,
+        },
+        config=cfg,
+    )
+    execute_sql_modify(f"insert into {staging_subscriptions}\n{subscriptions_query}")
+    # The transactions build reads the subscriptions table: it must see every part just inserted.
+    _sync_table_replicas(staging_subscriptions, config=cfg)
+
+    transactions_query = get_query(
+        "subscription_transactions_store_by_sub_date",
+        {
+            "date_start": block_start.strftime("%Y-%m-%d"),
+            "date_end": block_end.strftime("%Y-%m-%d"),
+            "subscriptions_table": staging_subscriptions,
+            "source_version": SUBSCRIPTION_SOURCE_VERSION,
+        },
+        config=cfg,
+    )
+    for attempt in range(1, SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS + 1):
+        execute_sql_modify(f"insert into {staging_transactions}\n{transactions_query}")
+        _sync_table_replicas(staging_transactions, config=cfg)
+
+        mismatches = _subscription_source_mismatches(
+            block_start,
+            block_end,
+            subscriptions_table=staging_subscriptions,
+            transactions_table=staging_transactions,
             config=cfg,
         )
-        execute_sql_modify(f"insert into {cfg.subscriptions_table}\n{subscriptions_query}")
-        # The transactions build reads the subscriptions table: it must see every part just inserted.
-        _sync_table_replicas(cfg.subscriptions_table, config=cfg)
+        if not mismatches:
+            break
 
-        transactions_query = get_query(
-            "subscription_transactions_store_by_sub_date",
-            {
-                "date_start": block_start.strftime("%Y-%m-%d"),
-                "date_end": block_end.strftime("%Y-%m-%d"),
-                "subscriptions_table": cfg.subscriptions_table,
-                "source_version": SUBSCRIPTION_SOURCE_VERSION,
-            },
-            config=cfg,
+        logger.warning(
+            "Subscription transactions for %s - %s do not match subscriptions (attempt %s/%s): %s",
+            block_start,
+            block_end,
+            attempt,
+            SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS,
+            mismatches,
         )
-        for attempt in range(1, SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS + 1):
-            execute_sql_modify(f"insert into {cfg.subscription_transactions_table}\n{transactions_query}")
-            _sync_table_replicas(cfg.subscription_transactions_table, config=cfg)
-
-            mismatches = _subscription_source_mismatches(block_start, block_end, config=cfg)
-            if not mismatches:
-                break
-
-            logger.warning(
-                "Subscription transactions for %s - %s do not match subscriptions (attempt %s/%s): %s",
-                block_start,
-                block_end,
-                attempt,
-                SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS,
-                mismatches,
+        if attempt == SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS:
+            raise RuntimeError(
+                "subscriptions_transactions is inconsistent with subscriptions after "
+                f"{SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS} attempts for {block_start} - {block_end}: "
+                f"{{year_month: (subscriptions_rows, transactions_rows)}} = {mismatches}"
             )
-            if attempt == SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS:
-                raise RuntimeError(
-                    "subscriptions_transactions is inconsistent with subscriptions after "
-                    f"{SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS} attempts for {block_start} - {block_end}: "
-                    f"{{year_month: (subscriptions_rows, transactions_rows)}} = {mismatches}"
-                )
-            _delete_subscriptions_block(cfg.subscription_transactions_table, block_start, block_end, config=cfg)
-            _sync_table_replicas(cfg.subscriptions_table, config=cfg)
+        _truncate_table(staging_transactions, config=cfg)
+        _sync_table_replicas(staging_subscriptions, config=cfg)
+
+    # A finished month never has zero subscriptions: an empty build is a broken
+    # build, and swapping it in would erase the month just like the old drop did.
+    staged_rows = _subscription_source_rows_by_month(staging_subscriptions, block_start, block_end)
+    empty_months = _missing_finished_months(block_start, block_end, staged_rows)
+    if empty_months:
+        raise RuntimeError(
+            f"Subscription source build for {block_start} - {block_end} produced no rows for {empty_months}; "
+            "the live partitions are kept as they are"
+        )
+
+    for year_month in _iter_year_months(block_start, block_end):
+        if not staged_rows.get(year_month):
+            continue
+        _replace_partition(cfg.subscriptions_table, year_month, staging_subscriptions, config=cfg)
+        _replace_partition(cfg.subscription_transactions_table, year_month, staging_transactions, config=cfg)
+    _sync_table_replicas(cfg.subscriptions_table, config=cfg)
+    _sync_table_replicas(cfg.subscription_transactions_table, config=cfg)
+
+
+def _missing_finished_months(
+    date_start: datetime.date,
+    date_end: datetime.date,
+    rows_by_month: dict[int, int],
+) -> list[int]:
+    """Months of the range, except the current one, that hold no rows."""
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    current_month = today.year * 100 + today.month
+    return [
+        year_month
+        for year_month in _iter_year_months(date_start, date_end)
+        if year_month != current_month and not rows_by_month.get(year_month)
+    ]
+
+
+def ensure_subscription_source_covers(
+    date_start: datetime.date,
+    date_end: datetime.date,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> None:
+    """Refuse to calculate on a subscriptions table with missing months.
+
+    Without this check an emptied source table produces a full set of zero
+    money metrics that look like a real result (2026-11-02).
+    """
+    cfg = get_config(config)
+    date_start = max(date_start, cfg.subscriptions_start_date)
+    rows_by_month = _subscription_source_rows_by_month(cfg.subscriptions_table, date_start, date_end)
+    missing_months = _missing_finished_months(date_start, date_end, rows_by_month)
+    if missing_months:
+        raise RuntimeError(
+            f"{cfg.subscriptions_table} has no subscriptions for {missing_months}: "
+            "rebuild the subscription source tables before calculating"
+        )
 
 
 def _create_bandit_experiment_users_table(
@@ -2975,6 +3105,11 @@ def create_experiments_subscription_table(
 ) -> str:
     cfg = get_config(config)
     _ensure_subscription_source_tables(config=cfg)
+    exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
+    exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
+    if exp_info["date_end"] > exp_info["date_start"]:
+        exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
+    ensure_subscription_source_covers(exp_start_dt.date(), exp_end_dt.date(), config=cfg)
     session_id = generate_random_id(32)
     table_name = f"exp_subscription_{experiment_storage_id(exp_info)}_{session_id}"
     query_part_1 = create_transient_table_sql(
@@ -2986,10 +3121,6 @@ def create_experiments_subscription_table(
     )
     where_filter = segment.get("swf", "1")
     having_filter = segment.get("shf", "1")
-    exp_start_dt = datetime.datetime.fromtimestamp(exp_info["date_start"], datetime.timezone.utc)
-    exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
-    if exp_info["date_end"] > exp_info["date_start"]:
-        exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
     query_part_2 = get_query(
         "subscriptions_joined_by_sub_date",
         params={
