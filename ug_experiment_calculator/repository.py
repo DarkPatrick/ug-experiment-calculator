@@ -628,12 +628,28 @@ def get_ugg_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) ->
     return get_exps_list("UG Growth", config=config)
 
 
+def get_crm_exps_list(*, config: Optional[ExperimentCalculatorConfig] = None) -> list[int]:
+    from .crm import get_crm_exps_list as _get_crm_exps_list
+
+    return _get_crm_exps_list(config=config)
+
+
 def is_bandit_exp_info(exp_info: dict) -> bool:
     return bool(exp_info.get("is_bandit"))
 
 
 def is_bandit_client(client: str) -> bool:
     return str(client) == UG_WEB_BANDIT_CLIENT
+
+
+def is_crm_exp_info(exp_info: dict) -> bool:
+    return bool(exp_info.get("is_crm"))
+
+
+def is_crm_client(client: str) -> bool:
+    from .crm import is_crm_client as _is_crm_client
+
+    return _is_crm_client(client)
 
 
 def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -> dict:
@@ -660,13 +676,21 @@ def get_experiment(id, *, config: Optional[ExperimentCalculatorConfig] = None) -
     exp_info["project"] = parse_configuration_project(exp_info["configuration"])
     exp_info["segments"] = parse_configuration_segments(exp_info["configuration"])
 
+    from .crm import build_crm_experiment, is_crm_admin_row
+
+    if "provider_id" in df.columns and is_crm_admin_row(df.provider_id[0]):
+        exp_info["provider_id"] = int(df.provider_id[0])
+        exp_info["provider_experiment_id"] = df.provider_experiment_id[0]
+        return build_crm_experiment(exp_info, config=config)
+
     logger.info("exp_info: %s", exp_info)
     return exp_info
 
 
 def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
-    if is_bandit_exp_info(exp_info):
-        # A bandit experiment has no admin start/stop history: one launch window.
+    if is_bandit_exp_info(exp_info) or is_crm_exp_info(exp_info):
+        # A bandit experiment has no admin start/stop history, and a CRM send's
+        # window comes from its own 'AB Test Start' events: one launch window.
         return [dict(exp_info)]
 
     base_id = experiment_base_id(exp_info)
@@ -725,8 +749,8 @@ def get_experiment_launches(exp_info: dict, *, config: Optional[ExperimentCalcul
 
 
 def get_experiment_client_contexts(exp_info: dict, *, config: Optional[ExperimentCalculatorConfig] = None) -> list[dict]:
-    if is_bandit_exp_info(exp_info):
-        # No admin client history for a bandit: the single bandit web client as-is.
+    if is_bandit_exp_info(exp_info) or is_crm_exp_info(exp_info):
+        # No admin client history for a bandit or a CRM send: its single client as-is.
         return _current_experiment_client_contexts(exp_info)
 
     base_id = experiment_base_id(exp_info)
@@ -1145,6 +1169,9 @@ def exp_raw_data_query_name(client: str, segment: dict, *, clients_options: obje
         # The bandit cohort is rebuilt in one full-window pass, so the same
         # template serves both the schema seed and the insert.
         return "exp_raw_data_bandit"
+    if is_crm_client(client):
+        # Same full-window rebuild as the bandit cohort.
+        return "exp_raw_data_crm"
     if base_client_for_calculation(client) == UG_WEB_CLIENT:
         if is_mobweb_segment(segment, clients_options, client):
             return f"exp_raw_data_mobweb{suffix}"
@@ -2867,6 +2894,63 @@ def _create_bandit_experiment_users_table(
     return full_table_name
 
 
+def _create_crm_experiment_users_table(
+    exp_info: dict,
+    client: str,
+    segment_name: str,
+    segment: dict,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    """Create/refresh a CRM cohort: one full-window rebuild per calculation.
+
+    The cohort itself is fixed once the send is over, but its
+    ``subscription_unified_ids`` grow as the recipients keep buying inside the
+    attribution window, so the segment is rebuilt rather than appended.
+    """
+    from .crm import attribution_window_seconds
+
+    cfg = get_config(config)
+    table_name = f"exp_users_{experiment_storage_id(exp_info)}"
+    full_table_name = cfg.full_table(table_name)
+    segment_hash = get_experiment_users_hash(exp_info, client, segment)
+    where_filter, having_filter = _experiment_users_query_filters(exp_info, segment)
+    query_params = {
+        "where_sql": where_filter,
+        "having_sql": having_filter,
+        "exp_id_sql": _clickhouse_string_literal(str(experiment_base_id(exp_info))),
+        "provider_experiment_id_sql": _clickhouse_string_literal(str(exp_info["provider_experiment_id"])),
+        "subscriptions_table": cfg.subscriptions_table,
+        "attribution_window_seconds": attribution_window_seconds(exp_info),
+    } | _experiment_time_params(exp_info)
+
+    is_exists = execute_sql(f"exists {full_table_name}")
+    if int(is_exists.iloc[0].values[0]) == 0:
+        query_part_1 = create_table_sql(
+            table_name,
+            schema="",
+            partition="toYYYYMM(toDate(exp_start_dt)), client, segment",
+            sorting="client, segment, segment_hash, exp_start_dt",
+            config=cfg,
+        )
+        seed_query = get_query("exp_raw_data_crm", params=query_params, config=cfg)
+        query_part_2 = _wrap_exp_users_query(seed_query, client, segment_name, segment_hash)
+        query = query_part_1 + "\n as \n select * from (\n" + query_part_2 + "\n) where 0"
+        logger.info("Creating CRM experiment users table with query:\n%s", query)
+        execute_sql_modify(query)
+
+    _delete_exp_users_segment(full_table_name, client, segment_name, config=cfg)
+
+    query_part_1 = _exp_users_insert_prefix(full_table_name)
+    insert_query = get_query("exp_raw_data_crm", params=query_params, config=cfg)
+    query = query_part_1 + "\n" + _wrap_exp_users_query(insert_query, client, segment_name, segment_hash)
+    logger.info("Inserting CRM experiment users with query:\n%s", query)
+    execute_sql_modify(query)
+    _sync_table_replicas(full_table_name, config=cfg)
+
+    return full_table_name
+
+
 def create_experiment_users_table(
     exp_info: dict,
     client: str,
@@ -2877,6 +2961,8 @@ def create_experiment_users_table(
 ) -> str:
     if is_bandit_exp_info(exp_info) or is_bandit_client(client):
         return _create_bandit_experiment_users_table(exp_info, client, segment_name, segment, config=config)
+    if is_crm_exp_info(exp_info) or is_crm_client(client):
+        return _create_crm_experiment_users_table(exp_info, client, segment_name, segment, config=config)
 
     cfg = get_config(config)
     exp_id = experiment_base_id(exp_info)
@@ -3167,6 +3253,9 @@ def create_experiments_subscription_table(
     exp_end_dt = datetime.datetime.now(datetime.timezone.utc)
     if exp_info["date_end"] > exp_info["date_start"]:
         exp_end_dt = datetime.datetime.fromtimestamp(exp_info["date_end"], datetime.timezone.utc)
+    from .crm import crm_subscription_sql, source_filter_sql, subscription_window_end
+
+    exp_end_dt = subscription_window_end(exp_info, exp_end_dt)
     ensure_subscription_source_covers(exp_start_dt.date(), exp_end_dt.date(), config=cfg)
     session_id = generate_random_id(32)
     table_name = f"exp_subscription_{experiment_storage_id(exp_info)}_{session_id}"
@@ -3188,6 +3277,8 @@ def create_experiments_subscription_table(
             "having_sql": having_filter,
             "subscriptions_table": cfg.subscriptions_table,
             "transactions_table": cfg.subscription_transactions_table,
+            "source_filter_sql": source_filter_sql(exp_info),
+            "crm_subscription_sql": crm_subscription_sql(exp_info),
         },
         config=cfg,
     )
@@ -3226,6 +3317,8 @@ def get_monetization_metrics(
     *,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> pd.DataFrame:
+    from .crm import attribution_window_seconds
+
     cfg = get_config(config)
     query = get_query(
         "monetization_metrics",
@@ -3236,6 +3329,7 @@ def get_monetization_metrics(
             "segment_sql": _clickhouse_string_literal(segment_name),
             "segment_hash_sql": _clickhouse_string_literal(segment_hash),
             "trial_conversion_model_table": cfg.full_table(TRIAL_CONVERSION_MODEL_TABLE),
+            "attribution_window_seconds": attribution_window_seconds(exp_info),
         },
         config=cfg,
     )

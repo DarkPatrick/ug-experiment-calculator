@@ -4,7 +4,7 @@ expected trial -> charge, %:
   - denominator: expected_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "expected conversion rate from clean trials to charges"
   - table_position: 1
@@ -18,7 +18,7 @@ expected arpu, $:
   - denominator: members
   - percentage: false
   - variance: arpu_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average expected revenue per user with trial revenue modeled from subscription price and historical trial conversion"
   - table_position: 1
@@ -32,7 +32,7 @@ arpu, $:
   - denominator: members
   - percentage: false
   - variance: arpu_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average revenue per user"
   - table_position: 1
@@ -45,7 +45,7 @@ lifetime_arpu, $:
   - denominator: members
   - percentage: false
   - variance: lifetime_arpu_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average lifetime revenue per user"
   - table_position: 1
@@ -59,7 +59,7 @@ aov, $:
   - denominator: charge_cnt
   - percentage: false
   - variance: arppu_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average order value"
   - table_position: 2
@@ -72,7 +72,7 @@ arppu, $:
   - denominator: buyer_cnt
   - percentage: false
   - variance: arppu_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average revenue per paying user"
   - table_position: 3
@@ -111,7 +111,7 @@ members -> subscribers, %:
   - denominator: members
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "conversion rate from members to subscribers"
   - table_position: 6
@@ -124,7 +124,7 @@ members -> buyers, %:
   - denominator: members
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "conversion rate from members to buyers"
   - table_position: 7
@@ -137,7 +137,7 @@ subscriptions per user:
   - denominator: members
   - percentage: false
   - variance: subscriptions_per_user_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average number of subscriptions per user"
   - table_position: 8
@@ -161,7 +161,7 @@ charges per user:
   - denominator: members
   - percentage: false
   - variance: charges_per_user_var
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "average number of charges per user"
   - table_position: 10
@@ -173,7 +173,7 @@ trials share, %:
   - denominator: access_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of trials among subscriptions"
   - table_position: 11
@@ -186,7 +186,7 @@ annual subscriptions share, %:
   - denominator: subscriptions_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of annual subscriptions among subscriptions"
   - table_position: 12
@@ -199,7 +199,7 @@ cheapskaters, %:
   - denominator: access_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of trial subscriptions cancelled within 1 hour, excluding trial-to-instant-offer cases"
   - table_position: 13
@@ -237,7 +237,7 @@ trial -> charge, %:
   - denominator: access_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
   - table_position: 12
@@ -250,7 +250,7 @@ trial -> any charge, %:
   - denominator: access_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "conversion rate from trial to charge"
   - table_position: 13
@@ -263,7 +263,7 @@ churn 14d, %:
   - denominator: charge_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of charges who churned within 14 days since payment date"
   - table_position: 14
@@ -276,7 +276,7 @@ refund 14d, %:
   - denominator: charge_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of charges who got refund within 14 days since payment date"
   - table_position: 15
@@ -289,7 +289,7 @@ pending 14d charges share, %:
   - denominator: charge_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of pending trials due payment date"
   - table_position: 0
@@ -302,7 +302,7 @@ active trial -> charge, %:
   - denominator: active_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "conversion rate from active trial to charge"
   - table_position: 0
@@ -315,7 +315,7 @@ pending trials share, %:
   - denominator: access_trial_cnt
   - percentage: true
   - distribution: "bernoulli"
-  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS"]
+  - sources: ["UG_WEB", "UG_IOS", "UG_ANDROID", "UGT_ANDROID", "UGT_IOS", "UG_CRM"]
   - platforms: ["all"]
   - description: "share of pending trials due payment date"
   - table_position: 0
@@ -1022,4 +1022,80 @@ participants -> buyers, %:
   - description: "bottom-of-funnel acquisition per bandit participant"
   - table_position: 109
   - positive: 1
+  - suffix: "%"
+
+# --- CRM (Bloomreach) email engagement --------------------------------------
+# Only for the CRM cohort (client "UG_CRM"): one 0/1 flag per Bloomreach
+# recipient of the campaign within the attribution window after 'AB Test Start'.
+# Unique users, so each rate is a proportion with a z-test (the CRM Redash
+# dashboard counts (campaign, action, date) tuples instead).
+
+sent -> delivered, %:
+  - domain: "monetization"
+  - subdomain: "crm_email"
+  - numerator: email_delivered_user_cnt
+  - denominator: email_sent_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_CRM"]
+  - platforms: ["all"]
+  - description: "delivery rate (DR): recipients with Email Delivered among recipients with Email Sent"
+  - table_position: 201
+  - positive: 1
+  - suffix: "%"
+
+delivered -> opened, %:
+  - domain: "monetization"
+  - subdomain: "crm_email"
+  - numerator: email_delivered_opened_user_cnt
+  - denominator: email_delivered_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_CRM"]
+  - platforms: ["all"]
+  - description: "open rate (OR): delivered recipients who opened the email"
+  - table_position: 202
+  - positive: 1
+  - suffix: "%"
+
+opened -> clicked, %:
+  - domain: "monetization"
+  - subdomain: "crm_email"
+  - numerator: email_opened_clicked_user_cnt
+  - denominator: email_opened_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_CRM"]
+  - platforms: ["all"]
+  - description: "click-through rate (CTR): openers who clicked a non-consent link"
+  - table_position: 203
+  - positive: 1
+  - suffix: "%"
+
+delivered -> clicked, %:
+  - domain: "monetization"
+  - subdomain: "crm_email"
+  - numerator: email_delivered_clicked_user_cnt
+  - denominator: email_delivered_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_CRM"]
+  - platforms: ["all"]
+  - description: "click rate (CR): delivered recipients who clicked a non-consent link"
+  - table_position: 204
+  - positive: 1
+  - suffix: "%"
+
+delivered -> unsubscribed, %:
+  - domain: "monetization"
+  - subdomain: "crm_email"
+  - numerator: email_unsubscribed_user_cnt
+  - denominator: email_delivered_user_cnt
+  - percentage: true
+  - distribution: "bernoulli"
+  - sources: ["UG_CRM"]
+  - platforms: ["all"]
+  - description: "unsubscribe rate: recipients with Consent Reject per delivered recipient (guardrail)"
+  - table_position: 205
+  - positive: 0
   - suffix: "%"

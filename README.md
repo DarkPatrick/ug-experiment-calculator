@@ -863,6 +863,28 @@ report_code = get_bandit_experiment_confluence_report_code(
 
 Read 1 - фиксированный admin-A/B (holdout против AI-bucket), единственный слой со значимостью. Read 2 - описательная per-arm таблица: армы колонками (control первым, дальше топ по participants, хвост сгруппирован в одну колонку "other N arms"), у каждого арма рядом со значениями метрик - participants, окно экспозиции, arm-switcher share (метка `contaminated` при >5%) и aix exposures; p-value нет by design. Плюс expand с записанной реконсиляцией. Значения per-arm таблицы пересчитываются из счетчиков `ug_exp_stats` (numerator/denominator метрики), поэтому сгруппированная колонка точная, а пул из 76 армов остается читаемым.
 
+## CRM-эксперименты (Bloomreach)
+
+CRM-рассылки с A/B-сплитом заводятся в админке автоматически как `Imported experiment [BLOOMREACH/<hex>]` с `provider_id = 1`: Bloomreach делит получателей одной кампании и пишет `AB Test Start` в `monetisation_crm.ug_bloomreach_campaign_events`. У такой строки нет события старта, `clients_options` и сегментов, а app/web-когорты этих получателей не видят, поэтому `get_experiment(<id>)` по `provider_id = 1` переключает эксперимент в CRM-режим (`ug_experiment_calculator.crm`):
+
+```python
+from ug_experiment_calculator import calculate_exp_info, get_crm_exps_list
+
+calculate_exp_info(8018)          # CRM-режим включается сам по provider_id = 1
+for exp_id in get_crm_exps_list():  # старт <= 30 дней назад, archive = 0
+    calculate_exp_info(exp_id)
+```
+
+- **Окно** - сами события `AB Test Start` этой кампании (`bm_campaign_id = provider_experiment_id`), а не даты админки: imported-эксперимент часто месяцами висит `status = 1` после разовой отправки.
+- **Когорта** (`exp_raw_data_crm.sql`, клиент `UG_CRM`) - одна строка на получателя Bloomreach (`user_id`); вариация - большее из значений по числовому id и по hex id (как в CRM-дашборде Redash 748). Ключ участника - синтетический `unified_id = -user_id`, поэтому Members совпадает с `uniqExact(user_id)` дашборда. Реальные идентичности лежат в `subscription_unified_ids`: `unified_id` из события плюс все `unified_id`, под которыми тот же `user_id` подписывался в окне. На exp 8018 только ~1/3 покупок получателя сделана под `unified_id` из email-события, поэтому связка только по `unified_id` теряла бы большинство покупок. Когорта пересобирается целиком при каждом расчете.
+- **Окно атрибуции - 3 дня** (`attribution_window_seconds` в exp_info, CRM-процесс: n_days_window = 3). В `monetization_metrics.sql` окно стало параметром `{attribution_window_seconds}`; для всех остальных экспериментов это по-прежнему 7 дней (604800).
+- **Источник подписок**: вне CRM-режима email-покупки по-прежнему исключаются (`funnel_source not like '%email%'`), в CRM-режиме - нет. CRM-покупка = `funnel_source like '%email%'` **или** `utm_medium = crm` в `monetisation_paid_ua.marketing_ug_subs_attribution_dbt` (`email_*` покрывает ~92% utm-CRM покупок на вебе, остальное видно только в атрибуции - как в Redash 22205).
+- **Сегменты** строятся автоматически: `Total` - все покупки получателей (After Split, любой источник, аналог Redash 22202); `CRM purchases` - только CRM-покупки (After Split pure CRM, аналог 22205); `Campaign purchases` - покупки по UTM-кампаниям, которые кликали получатели этой рассылки (After Click, аналог 22199). Сегменты из Configuration админки добавляются после них (одноименные стандартным игнорируются): `uwf` фильтрует сырые события `ug_bloomreach_campaign_events` (например, `bm_country = 'US'`), `swf` / `shf` - подписки, rights-фильтры сбрасываются в `All` с warning, потому что у событий Bloomreach нет прав.
+- **Дейли-крон** (`analytics-tools`, группа `crm`) берет CRM-эксперимент, как и любой другой, только когда в его Configuration есть непустой блок `segments`: так владелец помечает сплит как настоящий эксперимент, а импортированные служебные рассылки (ToS) не считаются. `get_crm_exps_list()` сам этот фильтр не применяет.
+- **Деньги**: к CRM-покупкам (флаг `is_crm_subscription`) поверх сторовой комиссии применяются доп. коэффициенты CRM-команды: вне US/CA x0.84 на iOS и Android, на Android еще x0.95 (`crm_revenue_coeff`). Веб и не-CRM покупки не меняются. Правило второго года iOS (0.7 в первый год, 0.85 дальше) уже есть в `lifetime_revenue`.
+- **Email-метрики** (`crm_email_metrics.sql`, subdomain `crm_email`, только для `UG_CRM`): флаги 0/1 на получателя в окне атрибуции - Sent, Delivered, Opened, Clicked (без consent-ссылок), Consent Reject; метрики `sent -> delivered, %`, `delivered -> opened, %`, `opened -> clicked, %`, `delivered -> clicked, %`, `delivered -> unsubscribed, %` - доли получателей с z-тестом. CRM-дашборд считает кортежи (campaign, action, date), поэтому абсолюты могут немного отличаться.
+- **Не считаются** для CRM: app/web retention и tab views (когорта по `user_id` Bloomreach), воронки tour и rollout (разовая отправка).
+
 ## Важные допущения и ограничения
 
 - Контрольная вариация сейчас жестко считается равной `1` в основном пайплайне.

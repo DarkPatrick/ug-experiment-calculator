@@ -53,6 +53,7 @@ from .repository import (
     update_subscription_source_tables,
     update_trial_conversion_model,
 )
+from .crm import CRM_EMAIL_METRIC_COLUMNS, get_crm_email_metrics, is_crm_exp_info
 from .rollout import update_rollout_split_users_daily
 
 
@@ -245,7 +246,10 @@ def _calculate_exp_segment_info(
             get_user_filters_hash(segment, client=client, clients_options=exp_info.get("clients_options", "")),
         )
         product_metrics_source_segment = product_metrics_segments.get(retention_cache_key)
-        include_product_metrics = product_metrics_source_segment is None
+        is_crm = is_crm_exp_info(exp_info)
+        # A CRM cohort is keyed by Bloomreach user_id, not by an app/web unified_id:
+        # app/web retention and tab views have nothing to join on.
+        include_product_metrics = product_metrics_source_segment is None and not is_crm
         if include_product_metrics:
             product_metrics_segments[retention_cache_key] = segment_name
 
@@ -330,6 +334,18 @@ def _calculate_exp_segment_info(
                 config=cfg,
             )
             df = _merge_metric_frame(df, bandit_funnel_df, BANDIT_FUNNEL_COLUMNS)
+
+        if is_crm:
+            logger.info("Loading CRM email metrics")
+            crm_email_df = get_crm_email_metrics(
+                exp_info,
+                exp_users_table,
+                client,
+                segment_name,
+                segment_hash,
+                config=cfg,
+            )
+            df = _merge_metric_frame(df, crm_email_df, CRM_EMAIL_METRIC_COLUMNS)
 
         frame_key = (exp_launch_id, client, segment_name)
         df_tot[frame_key] = df
@@ -662,7 +678,13 @@ def calculate_exp_info(
             _resolve_bandit_admin_experiment(exp_info, config=cfg)
             _record_bandit_reconciliation(exp_info, df_tot, config=cfg)
 
-        if update_rollout and exp_info.get("is_latest_launch", True) and not is_bandit_exp_info(exp_info):
+        # A CRM send is one-off: there is no ongoing rollout share to track.
+        if (
+            update_rollout
+            and exp_info.get("is_latest_launch", True)
+            and not is_bandit_exp_info(exp_info)
+            and not is_crm_exp_info(exp_info)
+        ):
             logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
             update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
             logger.info("Finished updating rollout split users for exp_id=%s", exp_id)

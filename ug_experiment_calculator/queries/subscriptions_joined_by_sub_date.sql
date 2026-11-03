@@ -8,12 +8,12 @@ select
         when lower(`platform`) like '%ios%' then 0.7
         when lower(`platform`) like '%and%' then 0.85
         else 1
-    end as `revenue`,
+    end * `crm_revenue_coeff` as `revenue`,
     `refund_revenue_gross` * case
         when lower(`platform`) like '%ios%' then 0.7
         when lower(`platform`) like '%and%' then 0.85
         else 1
-    end as `refund_revenue`,
+    end * `crm_revenue_coeff` as `refund_revenue`,
     arraySum(arrayMap(x -> x.2 *
         case
             when lower(`platform`) like '%ios%' and x.1 >= toDate(`subscribed_dt`) and x.1 < toDate(`subscribed_dt`) + interval 1 year then 0.7
@@ -21,7 +21,7 @@ select
             else 1
         end
         , `all_charges_arr_uniq`)
-    ) as `lifetime_revenue`,
+    ) * `crm_revenue_coeff` as `lifetime_revenue`,
     countIf(`funnel_source` like '%Instant Offer%' and lower(`service_name`) like '%pro%') over(partition by `unified_id`) as `has_pro_instant_offer`,
     countIf(`funnel_source` like '%Instant Offer%' and lower(`service_name`) like '%book%') over(partition by `unified_id`) as `has_book_instant_offer`,
     groupArrayIf(`subscribed_dt`, `funnel_source` like '%Instant Offer%' and lower(`service_name`) like '%pro%') over(partition by `unified_id`) as `pro_instant_offer_sub_dts`,
@@ -42,6 +42,19 @@ from (
         `use`.`product_id` as `product_id`,
         ifNull(`sev`.`base_price`, 0) as `base_price`,
         ifNull(`sev`.`country`, '') as `country`,
+        toUInt8({crm_subscription_sql}) as `is_crm_subscription`,
+        -- CRM-attributed purchases carry the CRM team's extra deductions on top of the
+        -- store commission (their revenue dashboards): outside US/CA x0.84 on iOS and
+        -- Android, and x0.95 on Android everywhere. Web and non-CRM purchases are untouched.
+        if(
+            {crm_subscription_sql},
+            multiIf(
+                lower(`use`.`platform`) like '%ios%', if(upper(ifNull(`sev`.`country`, '')) in ('US', 'CA'), 1, 0.84),
+                lower(`use`.`platform`) like '%and%', 0.95 * if(upper(ifNull(`sev`.`country`, '')) in ('US', 'CA'), 1, 0.84),
+                1
+            ),
+            1
+        ) as `crm_revenue_coeff`,
         `use`.`user_id` as `user_id`,
         `use`.`unified_id` as `unified_id`,
         `use`.`payment_account_id` as `payment_account_id`,
@@ -125,7 +138,7 @@ from (
     where
         toDate(`use`.`subscribed_dt`) between date_start - interval 15 day and date_end
     and
-        lower(`use`.`funnel_source`) not like '%email%'
+        ({source_filter_sql})
     and
         ({where_sql})
     and
