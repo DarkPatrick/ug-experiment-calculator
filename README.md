@@ -885,6 +885,22 @@ for exp_id in get_crm_exps_list():  # старт <= 30 дней назад, arch
 - **Email-метрики** (`crm_email_metrics.sql`, subdomain `crm_email`, только для `UG_CRM`): флаги 0/1 на получателя в окне атрибуции - Sent, Delivered, Opened, Clicked (без consent-ссылок), Consent Reject; метрики `sent -> delivered, %`, `delivered -> opened, %`, `opened -> clicked, %`, `delivered -> clicked, %`, `delivered -> unsubscribed, %` - доли получателей с z-тестом. CRM-дашборд считает кортежи (campaign, action, date), поэтому абсолюты могут немного отличаться.
 - **Не считаются** для CRM: app/web retention и tab views (когорта по `user_id` Bloomreach), воронки tour и rollout (разовая отправка).
 
+**Метрики CRM-чтения вне stats-таблиц** (`ug_experiment_calculator.crm_metrics`). Считаются по запросу поверх уже посчитанной когорты (`exp_users_<id>`) и собственного SQL подписок калькулятора, подставленного подзапросом: новых таблиц не создают, числители совпадают с `ug_exp_stats`. Возвращают длинные DataFrame, оформление - на вызывающем.
+
+```python
+from ug_experiment_calculator import get_crm_extra_metrics, get_crm_landing_funnel, get_crm_payment_mix
+
+get_crm_extra_metrics(8018, segment="CRM purchases")       # After Split
+get_crm_extra_metrics(8018, segment="Campaign purchases")  # After Click
+get_crm_landing_funnel(8018)                               # {"users": ..., "conversion": ...}
+get_crm_payment_mix(8018, segment="CRM purchases")
+```
+
+- `get_crm_extra_metrics` - `revenue per 1000 delivered, $` (выручка сегмента / получатели с Email Delivered x 1000) и `clicks -> charges, %` (чарджи сегмента / кликнувшие получатели). Обе - отношения сумм по участникам, p-value против контроля по дельта-методу через `metrics.calc_stats`.
+- `get_crm_landing_funnel` - воронка пейволла: Landing Open (`Landing Upgrade Open` с `utm_campaign` из кампаний этой рассылки, в окне атрибуции) → `Landing Instant Pay Available` → `Landing Ambulance View` (emergency offer) → Checkout View после первого Ambulance View (у offer нет accept-события) → `Landing Checkout View` → `Landing Purchase Click` → `PURCHASE_SUCCESS`. Связь с участником по `user_id` (лендинг открывается залогиненным из письма). Срезы `all` / `desktop` / `mobile` по реальному устройству первого открытия (`platform` 1 / 2-3), z-тесты конверсий шагов.
+- `get_crm_payment_mix` - зачардженные подписки сегмента по способу оплаты первого чарджа (`ug_subscriptions_events.payment_method`), доли и chi-square p-value микса против контроля.
+- Сверено на exp 8018 с опубликованной CRM-страницей: Landing Open 741 / 762 против 752 / 778 на странице, конверсии и их значимость совпадают; выручка в числителе равна `revenue` из `ug_exp_stats`.
+
 ## Важные допущения и ограничения
 
 - Контрольная вариация сейчас жестко считается равной `1` в основном пайплайне.
