@@ -1,8 +1,6 @@
 with
     {exp_id} as `exp_id`,
     toDate('{date_filter}') as `date_filter`,
-    {where_sql} as `where_condition`,
-    {having_sql} as `having_condition`,
     toDateTime({exp_start_ts}) as `exp_window_start_dt`,
     if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`
     
@@ -30,8 +28,17 @@ select
     '' AS `connection`,
     '( Other )' AS `device_manufacturer`
     -- , [('platform', toString(argMin(`urew`.`platform`, `urew`.`datetime`))), ('value', toString(argMin(`urew`.`value`, `urew`.`datetime`)))] as `params`
-from
-    `default`.`ug_rt_events_web` as `urew`
+from (
+    -- The segment's event filter (uwf) runs on raw events: in the outer query a
+    -- name like `type` or `country` is also an aggregated output alias, and the
+    -- filter would land on the aggregate (ILLEGAL_AGGREGATION, exp 8147 'Paid').
+    select
+        *
+    from
+        `default`.`ug_rt_events_web`
+    where
+        ({where_sql})
+) as `urew`
 where
     `urew`.`date` = `date_filter`
 and
@@ -40,8 +47,6 @@ and
     `urew`.`unified_id` > 0
 and
     not (lower(extractURLParameter(`urew`.`url`, 'utm_medium')) = 'crm' and lower(extractURLParameter(`urew`.`url`, 'utm_source')) = 'email')
-and
-    (where_condition)
 and
     `variation` > 0
 and
@@ -52,6 +57,6 @@ group by
     `unified_id`,
     `variation`
 having
-    (having_condition)
+    ({having_sql})
 and
     toDate(`exp_start_dt`, 'UTC') = `date_filter`

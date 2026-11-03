@@ -1,7 +1,5 @@
 with
     toDate('{date_filter}') as `date_filter`,
-    {where_sql} as `where_condition`,
-    {having_sql} as `having_condition`,
     toDateTime({exp_start_ts}) as `exp_window_start_dt`,
     if({exp_end_ts} <= {exp_start_ts}, now(), toDateTime({exp_end_ts})) as `exp_window_end_dt`
 
@@ -30,8 +28,17 @@ select
     toUInt8(toDate(toDateTime(intDiv(toInt64(`urew`.`unified_id`), 1000000000)), 'UTC') = toDate(toDateTime(min(toUnixTimestamp(`urew`.`datetime`)), 'UTC'))) AS `is_new`,
     '' AS `connection`,
     '( Other )' AS `device_manufacturer`
-from
-    `default`.`ug_rt_events_web` as `urew`
+from (
+    -- The segment's event filter (uwf) runs on raw events: in the outer query a
+    -- name like `type` or `country` is also an aggregated output alias, and the
+    -- filter would land on the aggregate (ILLEGAL_AGGREGATION, exp 8147 'Paid').
+    select
+        *
+    from
+        `default`.`ug_rt_events_web`
+    where
+        ({where_sql})
+) as `urew`
 where
     `urew`.`date` between toDate(`exp_window_start_dt`) and toDate(`exp_window_end_dt`)
 and
@@ -47,12 +54,10 @@ and
 and
     `urew`.`params.str_value`[indexOf(`urew`.`params.key`, 'aix_variant_id')] != ''
 and
-    (where_condition)
-and
     `urew`.`source` = '{client}'
 group by
     `unified_id`
 having
-    (having_condition)
+    ({having_sql})
 and
     `variation` > 0

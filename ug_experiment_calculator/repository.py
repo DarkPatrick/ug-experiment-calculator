@@ -3018,6 +3018,9 @@ def create_experiment_users_slice_segments(
             `slice_value`
     """
     slice_values_df = execute_sql(slice_values_query)
+    # An empty segment comes back as a frame without columns: it simply has no slices.
+    if "slice_value" not in slice_values_df.columns:
+        return []
     slice_values = [str(value) for value in slice_values_df["slice_value"].dropna().tolist()]
 
     derived_segments = []

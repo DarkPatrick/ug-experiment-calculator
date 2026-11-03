@@ -1,8 +1,6 @@
 with
     toDate('{date_start}') as date_start,
-    toDate('{date_end}') as date_end,
-    {where_sql} as `where_condition`,
-    {having_sql} as `having_condition`
+    toDate('{date_end}') as date_end
 
 select
     *,
@@ -129,7 +127,7 @@ from (
     and
         lower(`use`.`funnel_source`) not like '%email%'
     and
-        (`where_condition`)
+        ({where_sql})
     and
-        (`having_condition`)
+        ({having_sql})
 )

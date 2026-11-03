@@ -541,6 +541,7 @@ def calculate_exp_info(
         ],
     )
 
+    segment_failures: list[str] = []
     for exp_info in launch_infos:
         launch_id = experiment_launch_id(exp_info)
         output_exp_id = experiment_output_exp_id(exp_info)
@@ -574,59 +575,73 @@ def calculate_exp_info(
         for client_exp_info in client_contexts:
             client = client_exp_info["clients_list"][0]
             active_segment_names = set()
+            client_failed = False
             for segment_name, segment in client_exp_info["segments"].items():
-                segment_hash = get_experiment_users_hash(client_exp_info, client, segment)
-                logger.info(
-                    "Calculating experiment info for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
-                    output_exp_id,
-                    launch_id,
-                    client,
-                    segment_name,
-                )
-                logger.info("Experiment info:\n%s", client_exp_info)
-
-                logger.info("Loading users")
-                exp_users_table = create_experiment_users_table(client_exp_info, client, segment_name, segment, config=cfg)
-                segment_items = [(segment_name, segment, segment_hash)]
-                segment_items.extend(
-                    create_experiment_users_slice_segments(
-                        client_exp_info,
-                        exp_users_table,
-                        client,
-                        segment_name,
-                        segment,
-                        segment_hash,
-                        config=cfg,
-                    )
-                )
-                active_segment_names.update(segment_item[0] for segment_item in segment_items)
-
-                for current_segment_name, current_segment, current_segment_hash in segment_items:
+                try:
+                    segment_hash = get_experiment_users_hash(client_exp_info, client, segment)
                     logger.info(
-                        "Calculating segment metrics for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
+                        "Calculating experiment info for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
                         output_exp_id,
                         launch_id,
                         client,
-                        current_segment_name,
+                        segment_name,
                     )
-                    subscription_table = _calculate_exp_segment_info(
-                        exp_info=client_exp_info,
-                        funnels_config=funnels_config,
-                        exp_users_table=exp_users_table,
-                        client=client,
-                        segment_name=current_segment_name,
-                        segment=current_segment,
-                        segment_hash=current_segment_hash,
-                        df_tot=df_tot,
-                        df_cum_agg_tot=df_cum_agg_tot,
-                        stats_df_tot=stats_df_tot,
-                        retention_cache=retention_cache,
-                        tab_view_cache=tab_view_cache,
-                        product_metrics_segments=product_metrics_segments,
-                        config=cfg,
-                    )
+                    logger.info("Experiment info:\n%s", client_exp_info)
 
-            if exp_users_table:
+                    logger.info("Loading users")
+                    exp_users_table = create_experiment_users_table(client_exp_info, client, segment_name, segment, config=cfg)
+                    segment_items = [(segment_name, segment, segment_hash)]
+                    segment_items.extend(
+                        create_experiment_users_slice_segments(
+                            client_exp_info,
+                            exp_users_table,
+                            client,
+                            segment_name,
+                            segment,
+                            segment_hash,
+                            config=cfg,
+                        )
+                    )
+                    active_segment_names.update(segment_item[0] for segment_item in segment_items)
+
+                    for current_segment_name, current_segment, current_segment_hash in segment_items:
+                        logger.info(
+                            "Calculating segment metrics for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
+                            output_exp_id,
+                            launch_id,
+                            client,
+                            current_segment_name,
+                        )
+                        subscription_table = _calculate_exp_segment_info(
+                            exp_info=client_exp_info,
+                            funnels_config=funnels_config,
+                            exp_users_table=exp_users_table,
+                            client=client,
+                            segment_name=current_segment_name,
+                            segment=current_segment,
+                            segment_hash=current_segment_hash,
+                            df_tot=df_tot,
+                            df_cum_agg_tot=df_cum_agg_tot,
+                            stats_df_tot=stats_df_tot,
+                            retention_cache=retention_cache,
+                            tab_view_cache=tab_view_cache,
+                            product_metrics_segments=product_metrics_segments,
+                            config=cfg,
+                        )
+                except Exception as exc:
+                    # One broken segment (a bad admin filter, a failed query) must not abort
+                    # the rest: the clients after it used to stay stale for weeks (exp 8147).
+                    logger.exception(
+                        "Segment calculation failed for exp_id=%s, exp_launch_id=%s, client=%s, segment=%s",
+                        output_exp_id,
+                        launch_id,
+                        client,
+                        segment_name,
+                    )
+                    segment_failures.append(f"{launch_id}/{client}/{segment_name}: {type(exc).__name__}: {exc}")
+                    client_failed = True
+
+            if exp_users_table and not client_failed:
                 cleanup_obsolete_experiment_segments(
                     client_exp_info,
                     exp_users_table,
@@ -635,7 +650,7 @@ def calculate_exp_info(
                     config=cfg,
                 )
 
-        if exp_users_table:
+        if exp_users_table and not segment_failures:
             cleanup_obsolete_experiment_clients(
                 exp_info,
                 exp_users_table,
@@ -651,6 +666,12 @@ def calculate_exp_info(
             logger.info("Updating rollout split users for exp_id=%s, clients=%s", exp_id, exp_info["clients_list"])
             update_rollout_split_users_daily(exp_info, exp_info["clients_list"], config=cfg)
             logger.info("Finished updating rollout split users for exp_id=%s", exp_id)
+
+    if segment_failures:
+        raise RuntimeError(
+            f"Experiment {exp_id}: {len(segment_failures)} segment(s) failed, the rest were calculated: "
+            + "; ".join(segment_failures)
+        )
 
     return df_tot, df_cum_agg_tot, stats_df_tot, f"exp_users_table={exp_users_table}, subscription_table={subscription_table}"
 
