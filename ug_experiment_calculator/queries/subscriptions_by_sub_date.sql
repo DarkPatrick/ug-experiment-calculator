@@ -101,22 +101,50 @@ from (
         ) as `all_charges_arr_uniq`
     from (
         select
-            *,
+            `evt`.*,
             -- Tie-break for argMinIf over Subscribed events: iOS sends two Subscribed events for
             -- one subscription in the same second with different accounts (one often with
             -- user_id = 0), and a datetime-only key picked either of them at random.
             tuple(
-                `datetime`,
-                `user_id` = 0,
-                `payment_account_id`,
+                `evt`.`datetime`,
+                `evt`.`user_id` = 0,
+                `evt`.`payment_account_id`,
                 cityHash64(
-                    `user_id`, `unified_id`, `payment_account_id_vector`, `product_code`, `product_id`, `platform`,
-                    `funnel_source`, `service_name`, `duration_count`, `trial`, `base_price`, `country`, `datetime_next_billing`
+                    `evt`.`user_id`, `evt`.`unified_id`, `evt`.`payment_account_id_vector`, `evt`.`product_code`, `evt`.`product_id`, `evt`.`platform`,
+                    `evt`.`funnel_source`, `evt`.`service_name`, `evt`.`duration_count`, `evt`.`trial`, `evt`.`base_price`, `evt`.`country`, `evt`.`datetime_next_billing`
                 )
             ) as `subscribed_pick_key`,
-            `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`
+            -- Web intro purchase: the intro subscription carries the param on its Subscribed and
+            -- Charged rows only, never on its Refunded / Canceled ones. Resolve it per subscription
+            -- (`itm`), so the refund of an intro charge lands on the base subscription too.
+            if(
+                `evt`.`params.str_value`[indexOf(`evt`.`params.key`, 'original_subscription_id')] != '',
+                `evt`.`params.str_value`[indexOf(`evt`.`params.key`, 'original_subscription_id')],
+                ifNull(`itm`.`base_id`, '')
+            ) as `original_subscription_id`
         from
-            `default`.`ug_subscriptions_events`
+            `default`.`ug_subscriptions_events` as `evt`
+        left join (
+            select
+                `ims`.`subscription_id` as `intro_id`,
+                max(`ims`.`params.str_value`[indexOf(`ims`.`params.key`, 'original_subscription_id')]) as `base_id`
+            from
+                `default`.`ug_subscriptions_events` as `ims`
+            where
+                `ims`.`event` in ('Subscribed', 'Charged')
+            and
+                lower(`ims`.`platform`) not like '%ios%'
+            and
+                has(`ims`.`params.key`, 'original_subscription_id')
+            and
+                `ims`.`date` >= date_start - interval 15 day
+            group by
+                `ims`.`subscription_id`
+            having
+                `base_id` != ''
+        ) as `itm`
+        on
+            `evt`.`subscription_id` = `itm`.`intro_id`
     ) as `use`
     where
         `use`.`date` >= date_start - interval 15 day

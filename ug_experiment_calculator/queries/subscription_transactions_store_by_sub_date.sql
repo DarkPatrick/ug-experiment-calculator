@@ -62,21 +62,52 @@ from (
     ) as `sub`
     left join (
         select
-            *,
-            `params.str_value`[indexOf(`params.key`, 'original_subscription_id')] as `original_subscription_id`,
-            toDate(`datetime`) as `event_date`,
+            `evt`.*,
+            -- Web intro purchase: the intro subscription carries the param on its Subscribed and
+            -- Charged rows only, never on its Refunded / Canceled ones. Resolve it per subscription
+            -- (`itm`), so the refund of an intro charge lands on the base subscription too instead
+            -- of a key with no subscription row.
+            if(
+                `evt`.`params.str_value`[indexOf(`evt`.`params.key`, 'original_subscription_id')] != '',
+                `evt`.`params.str_value`[indexOf(`evt`.`params.key`, 'original_subscription_id')],
+                ifNull(`itm`.`base_id`, '')
+            ) as `original_subscription_id`,
+            toDate(`evt`.`datetime`) as `event_date`,
             case
-                when `product_id` in ('com.ultimateguitar.tabs.plus.intro.1year', 'com.ultimateguitar.ugt.plus.intro.1year2', 'com.ultimateguitar.tabs.plus.1year7') then `usd_price` * 19.99/39.99
-                else `usd_price`
+                when `evt`.`product_id` in ('com.ultimateguitar.tabs.plus.intro.1year', 'com.ultimateguitar.ugt.plus.intro.1year2', 'com.ultimateguitar.tabs.plus.1year7') then `evt`.`usd_price` * 19.99/39.99
+                else `evt`.`usd_price`
             end as `revenue_gross`,
-            -toFloat32OrZero(`params.str_value`[indexOf(`params.key`, 'usd_refund')]) as `upgrade_revenue`
+            -toFloat32OrZero(`evt`.`params.str_value`[indexOf(`evt`.`params.key`, 'usd_refund')]) as `upgrade_revenue`
         from
-            `default`.`ug_subscriptions_events`
+            `default`.`ug_subscriptions_events` as `evt`
+        left join (
+            -- intro subscription -> base subscription. The intro is bought together with the base,
+            -- so its Subscribed / Charged rows are inside the same bound as the block's events.
+            select
+                `ims`.`subscription_id` as `intro_id`,
+                max(`ims`.`params.str_value`[indexOf(`ims`.`params.key`, 'original_subscription_id')]) as `base_id`
+            from
+                `default`.`ug_subscriptions_events` as `ims`
+            where
+                `ims`.`event` in ('Subscribed', 'Charged')
+            and
+                lower(`ims`.`platform`) not like '%ios%'
+            and
+                has(`ims`.`params.key`, 'original_subscription_id')
+            and
+                `ims`.`date` >= date_start - interval 1 day
+            group by
+                `ims`.`subscription_id`
+            having
+                `base_id` != ''
+        ) as `itm`
+        on
+            `evt`.`subscription_id` = `itm`.`intro_id`
         where
-            `event` in ('Charged', 'Canceled', 'Refunded', 'Crossgrade', 'Upgrade', 'Downgrade')
+            `evt`.`event` in ('Charged', 'Canceled', 'Refunded', 'Crossgrade', 'Upgrade', 'Downgrade')
         -- Only events at or after subscribed_dt are attributed, so nothing before the block is needed.
         and
-            `date` >= date_start - interval 1 day
+            `evt`.`date` >= date_start - interval 1 day
     ) as `use`
     on
         if(

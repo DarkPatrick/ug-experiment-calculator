@@ -32,7 +32,8 @@ from .config import ExperimentCalculatorConfig
 logger = logging.getLogger(__name__)
 # 11: trial widened to UInt16, every row rebuilt so values over 255 are recomputed.
 # 12: deterministic tie-break for the per-subscription picks (subscribed_pick_key).
-SUBSCRIPTION_SOURCE_VERSION = 12
+# 13: refunds / cancels of a web intro subscription merged onto its base subscription.
+SUBSCRIPTION_SOURCE_VERSION = 13
 SUBSCRIPTION_SOURCE_FRESHNESS = datetime.timedelta(hours=1)
 SUBSCRIPTION_SOURCE_BUILD_ATTEMPTS = 2
 SUBSCRIPTION_SOURCE_INCREMENTAL_LOOKBACK_DAYS = 45
