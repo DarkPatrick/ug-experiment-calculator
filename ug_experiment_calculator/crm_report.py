@@ -107,8 +107,10 @@ def format_diff(kind: str, control: Any, test: Any) -> str:
         return ""
     delta = test_number - control_number
     if kind in (MONEY, MONEY_CENTS):
-        sign = "+" if delta > 0 else ("-" if delta < 0 else "")
         magnitude = format_value(kind, abs(delta))
+        if not any(ch in "123456789" for ch in magnitude):
+            return magnitude  # rounds to zero: "$0" / "$0.00", never "-$0"
+        sign = "+" if delta > 0 else "-"
         return f"{sign}{magnitude}"
     if control_number == 0:
         return ""
@@ -434,7 +436,8 @@ def money_columns(stats: pd.DataFrame, results: pd.DataFrame, extra: pd.DataFram
 # --- the block ------------------------------------------------------------------------------------
 
 def header_paragraph(exp_info: Mapping[str, Any], *, today: Optional[datetime.date] = None) -> str:
-    split = datetime.datetime.fromtimestamp(int(exp_info["date_start"]), datetime.timezone.utc).date()
+    split_ts = int(exp_info.get("crm_send_ts") or exp_info["date_start"])
+    split = datetime.datetime.fromtimestamp(split_ts, datetime.timezone.utc).date()
     window_end = split + datetime.timedelta(seconds=attribution_window_seconds(dict(exp_info)))
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
     day = (today - split).days

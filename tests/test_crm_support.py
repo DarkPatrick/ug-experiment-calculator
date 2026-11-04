@@ -111,6 +111,25 @@ class CrmSourceFiltersTest(unittest.TestCase):
         self.assertIn("ss2026_pro_web_free_b", exp_info["segments"][crm.CRM_SEGMENT_CAMPAIGN]["swf"])
         # the window is the send itself, not the admin dates
         self.assertEqual(exp_info["date_end"] - exp_info["date_start"], 33)
+        # no send_dt column (older query result): the split date falls back to the first start
+        self.assertEqual(exp_info["crm_send_ts"], exp_info["date_start"])
+
+    def test_split_date_ignores_a_stray_early_start(self) -> None:
+        admin = {"id": 8225, "date_start": 1793000000, "date_end": 1795000000, "provider_experiment_id": "6adfa4e6b2fa2ce6a6884c4f"}
+        window = pd.DataFrame(
+            {
+                "first_event_dt": [pd.Timestamp("2026-10-27 16:31:01")],
+                "last_event_dt": [pd.Timestamp("2026-10-28 19:09:30")],
+                "send_dt": [pd.Timestamp("2026-10-28 19:03:38")],
+                "users_cnt": [2767279],
+                "clicked_utm_campaigns": [[]],
+            }
+        )
+        with mock.patch.object(crm, "execute_sql", return_value=window):
+            exp_info = crm.build_crm_experiment(admin, config=ExperimentCalculatorConfig())
+        # the cohort window still starts at the first start, the report's split date is the mass send
+        self.assertEqual(exp_info["date_start"], int(pd.Timestamp("2026-10-27 16:31:01", tz="UTC").timestamp()))
+        self.assertEqual(exp_info["crm_send_ts"], int(pd.Timestamp("2026-10-28 19:03:38", tz="UTC").timestamp()))
 
     def test_admin_segments_are_added_without_rights(self) -> None:
         admin = {
