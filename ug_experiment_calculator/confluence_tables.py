@@ -351,11 +351,21 @@ def get_experiment_confluence_report_code(
     update_split_users: bool = False,
     ensure_experiment_users: bool = False,
     daily_users_by_client: Any = None,
+    crm_include_landing_funnel: bool = True,
 ) -> str:
     from .repository import get_experiment, get_experiment_clients
 
     cfg = config or ExperimentCalculatorConfig.from_env()
     exp_info = get_experiment(exp_id, config=cfg)
+    if exp_info.get("is_crm"):
+        # A CRM (Bloomreach) send is reported on the CRM team's template, not this one.
+        from .crm_report import get_crm_experiment_confluence_report_code
+
+        return get_crm_experiment_confluence_report_code(
+            exp_id,
+            include_landing_funnel=crm_include_landing_funnel,
+            config=cfg,
+        )
     selected_clients = _ordered_report_clients(
         get_experiment_clients(exp_info, list(clients) if clients is not None else None, config=cfg)
     )

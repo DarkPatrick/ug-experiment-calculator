@@ -12,7 +12,7 @@ from ug_experiment_calculator.config import ExperimentCalculatorConfig
 
 
 QUERIES_DIR = Path(repository.__file__).parent / "queries"
-TEMPLATES = ["crm_member_ctes.sql", "crm_member_metrics.sql", "crm_payment_mix.sql", "crm_landing_funnel.sql"]
+TEMPLATES = ["crm_member_ctes.sql", "crm_member_metrics.sql", "crm_payment_mix.sql", "crm_landing_funnel.sql", "crm_landing_steps.sql"]
 
 
 def _placeholders(sql: str) -> set[str]:

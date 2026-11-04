@@ -102,6 +102,8 @@ _EXPORTS = {
     "get_crm_extra_metrics": ("crm_metrics", "get_crm_extra_metrics"),
     "get_crm_landing_funnel": ("crm_metrics", "get_crm_landing_funnel"),
     "get_crm_payment_mix": ("crm_metrics", "get_crm_payment_mix"),
+    "get_crm_landing_steps": ("crm_metrics", "get_crm_landing_steps"),
+    "get_crm_experiment_confluence_report_code": ("crm_report", "get_crm_experiment_confluence_report_code"),
     "get_ugm_exps_list": ("repository", "get_ugm_exps_list"),
     "get_ugp_exps_list": ("repository", "get_ugp_exps_list"),
     "load_funnels_config": ("metrics", "load_funnels_config"),

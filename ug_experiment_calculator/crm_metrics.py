@@ -349,6 +349,27 @@ def get_crm_landing_funnel(
     return build_crm_landing_funnel(execute_sql(query))
 
 
+def get_crm_landing_steps(
+    exp_id,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> pd.DataFrame:
+    """Step-by-step landing funnel counts per variation and device (crm_landing_steps.sql):
+    where the visitors bought (paywall / checkout / emergency offer) and where the others left,
+    in the layout of the CRM page template. Input of ``crm_report``'s landing tables."""
+    cfg = get_config(config)
+    ctx = _crm_context(exp_id, CRM_SEGMENT_ALL, cfg)
+    campaigns = ctx["exp_info"].get("crm_clicked_utm_campaigns") or []
+    params = _common_params(ctx) | {
+        "utm_campaigns_sql": ", ".join(_clickhouse_string_literal(value) for value in campaigns) or "''",
+    }
+    from .repository import get_query
+
+    query = get_query("crm_landing_steps", params=params, config=cfg)
+    logger.info("crm landing steps query:\n%s", query)
+    return execute_sql(query)
+
+
 def _final_sql(query_name: str, ctx: dict, config: ExperimentCalculatorConfig) -> str:
     from .repository import get_query
 
