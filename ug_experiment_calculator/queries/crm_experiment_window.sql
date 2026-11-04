@@ -3,6 +3,8 @@
 select
     minIf(`bce`.`datetime`, `bce`.`event` = 'AB Test Start') as `first_event_dt`,
     maxIf(`bce`.`datetime`, `bce`.`event` = 'AB Test Start') as `last_event_dt`,
+    -- the mass send: a stray early start (a test send, a single re-queued recipient) must not move the split date
+    quantileExactIf(0.01)(`bce`.`datetime`, `bce`.`event` = 'AB Test Start') as `send_dt`,
     uniqExactIf(`bce`.`user_id`, `bce`.`event` = 'AB Test Start') as `users_cnt`,
     arraySort(groupUniqArrayIf(
         lower(`bce`.`bm_utm_campaign`),

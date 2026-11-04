@@ -174,6 +174,7 @@ def build_crm_experiment(admin_exp_info: dict, *, config: Optional[ExperimentCal
 
     first_event_dt = pd.to_datetime(window_df["first_event_dt"].iloc[0])
     last_event_dt = pd.to_datetime(window_df["last_event_dt"].iloc[0])
+    send_dt = pd.to_datetime(window_df["send_dt"].iloc[0]) if "send_dt" in window_df.columns else first_event_dt
     clicked_utm_campaigns = [str(value) for value in list(window_df["clicked_utm_campaigns"].iloc[0] or [])]
 
     exp_info = dict(admin_exp_info)
@@ -184,6 +185,9 @@ def build_crm_experiment(admin_exp_info: dict, *, config: Optional[ExperimentCal
             # Timestamps of the cohort intake; the send usually takes under a minute.
             "date_start": int(first_event_dt.replace(tzinfo=datetime.timezone.utc).timestamp()),
             "date_end": int(last_event_dt.replace(tzinfo=datetime.timezone.utc).timestamp()) + 1,
+            # The mass send (1st percentile of the starts): the split date of the report. date_start stays the
+            # first start so that no participant falls outside the cohort window.
+            "crm_send_ts": int(send_dt.replace(tzinfo=datetime.timezone.utc).timestamp()),
             "admin_date_start": admin_start,
             "admin_date_end": admin_end,
             "experiment_event_start": CRM_ENTRY_EVENT,

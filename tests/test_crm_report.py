@@ -28,6 +28,11 @@ class SignificanceAndDiffTest(unittest.TestCase):
         self.assertEqual(crm_report.format_diff(crm_report.MONEY_CENTS, 1.46, 1.82), "+$0.36")
         self.assertEqual(crm_report.format_diff(crm_report.COUNT, 88, 100), "")
 
+    def test_money_diff_that_rounds_to_zero_has_no_sign(self) -> None:
+        self.assertEqual(crm_report.format_diff(crm_report.MONEY, 23.4, 23.1), "$0")
+        self.assertEqual(crm_report.format_diff(crm_report.MONEY, 851.2, 850.9), "$0")
+        self.assertEqual(crm_report.format_diff(crm_report.MONEY, 23.4, 22.1), "-$1")
+
     def test_money_is_whole_dollars_except_per_1000(self) -> None:
         self.assertEqual(crm_report.format_value(crm_report.MONEY, 2512.6), "$2,513")
         self.assertEqual(crm_report.format_value(crm_report.MONEY, 23.4), "$23")
@@ -113,6 +118,12 @@ class ReportBlockTest(unittest.TestCase):
         self.assertNotIn("ui-expand", code)
         self.assertIn("Split 2026-09-11, read on day 7 (2026-09-18), attribution window 3 days (to 2026-09-14).", code)
         self.assertIn("A = control (variation 1), B = test (variation 2).", code)
+
+    def test_split_date_is_the_mass_send_not_a_stray_start(self) -> None:
+        # one recipient started on 2026-10-27, the send went out on 2026-10-28 19:03
+        exp_info = {"id": 8225, "date_start": 1793118661, "crm_send_ts": 1793214180, "attribution_window_seconds": 259200}
+        text = crm_report.header_paragraph(exp_info, today=datetime.date(2026, 11, 4))
+        self.assertIn("Split 2026-10-28, read on day 7 (2026-11-04), attribution window 3 days (to 2026-10-31).", text)
 
     def test_interim_read_is_named(self) -> None:
         exp_info = {"id": 8018, "date_start": 1789139767, "date_end": 1789139800, "attribution_window_seconds": 259200}
