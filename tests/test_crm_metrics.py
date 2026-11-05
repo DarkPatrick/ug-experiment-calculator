@@ -19,6 +19,24 @@ def _placeholders(sql: str) -> set[str]:
     return {name for _, name, _, _ in string.Formatter().parse(sql) if name}
 
 
+class CrmSubscriptionDedupTest(unittest.TestCase):
+    # exp 8168 (2026-11-05): a subscription matched two recipients who share a device or a payment
+    # account; charges were counted once (uniq per variation) but revenue twice (per-member sums).
+    def test_crm_client_keeps_one_recipient_per_subscription(self) -> None:
+        sql = (QUERIES_DIR / "monetization_metrics.sql").read_text()
+        rendered = sql.replace("{client_sql}", "'UG_CRM'")
+        self.assertIn("`subscription_matches_all` as (", rendered)
+        self.assertIn("partition by `sma`.`subscription_id`, `sma`.`product_id`, `sma`.`subscribed_dt`", rendered)
+        self.assertIn("'UG_CRM' != 'UG_CRM'\n        or\n            `match_rank` = 1", rendered)
+        # every later CTE still reads the deduplicated `subscription_matches`, not the raw union
+        self.assertEqual(rendered.count("`subscription_matches_all` as `sma`"), 1)
+        self.assertIn("`subscription_matches` as `sta`", rendered)
+
+    def test_other_clients_keep_every_match(self) -> None:
+        sql = (QUERIES_DIR / "monetization_metrics.sql").read_text().replace("{client_sql}", "'UG_WEB'")
+        self.assertIn("'UG_WEB' != 'UG_CRM'", sql)
+
+
 class CrmMetricsTemplatesTest(unittest.TestCase):
     def test_single_statement_and_known_parameters(self) -> None:
         allowed = set(crm_metrics._common_params.__code__.co_names) | {

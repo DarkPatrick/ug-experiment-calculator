@@ -172,10 +172,48 @@ with
         where
             not has(`eum`.`subscription_join_unified_ids`, `sta`.`unified_id`)
     ),
-    `subscription_matches` as (
+    `subscription_matches_all` as (
         select * from `unified_matches`
         union distinct
         select * from `payment_account_matches`
+    ),
+    `exp_user_starts` as (
+        select
+            `eut`.`unified_id` as `member_unified_id`,
+            min(`eut`.`exp_start_dt`) as `member_start_dt`
+        from
+            `exp_users` as `eut`
+        group by
+            `member_unified_id`
+    ),
+    `subscription_matches` as (
+        -- CRM (client UG_CRM): one subscription belongs to one recipient. Two Bloomreach users who
+        -- share a device or a payment account both match it, and every per-member sum (revenue,
+        -- buyers) would count it twice. Keep the recipient who is the subscription's own user,
+        -- else the earliest start, else the lowest id. Other clients keep every match as before.
+        select
+            * except (`match_rank`)
+        from (
+            select
+                `sma`.*,
+                row_number() over (
+                    partition by `sma`.`subscription_id`, `sma`.`product_id`, `sma`.`subscribed_dt`
+                    order by
+                        toInt64(`sma`.`user_id`) = -toInt64(`sma`.`exp_unified_id`) desc,
+                        `eus`.`member_start_dt` asc,
+                        `sma`.`exp_unified_id` asc
+                ) as `match_rank`
+            from
+                `subscription_matches_all` as `sma`
+            left join
+                `exp_user_starts` as `eus`
+            on
+                `sma`.`exp_unified_id` = `eus`.`member_unified_id`
+        )
+        where
+            {client_sql} != 'UG_CRM'
+        or
+            `match_rank` = 1
     ),
     `latest_trial_conversion_model` as (
         select
