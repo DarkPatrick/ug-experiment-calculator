@@ -242,13 +242,6 @@ STEP_BASES = {
 }
 
 
-def _rate_cell(numerator: float, denominator: float, rate: Optional[float]) -> str:
-    """'18 / 340 = 5.29%': the rate together with the two counts it is computed from."""
-    if rate is None:
-        return ""
-    return f"{format_integer_value(numerator)} / {format_integer_value(denominator)} = {format_value(RATE, rate)}"
-
-
 def _proportion_pvalue(x0: float, n0: float, x1: float, n1: float) -> float | None:
     if n0 <= 0 or n1 <= 0:
         return None
@@ -274,8 +267,8 @@ def landing_totals(steps: pd.DataFrame, platform: str = "all") -> dict[int, dict
 def build_landing_steps_table(totals: Mapping[int, Mapping[str, float]]) -> str:
     """Steps in rows; columns Step, % of, A, B, A %, B %, diff, %, p-value (the CRM funnel exception).
 
-    Every rate names its base in the "% of" column and shows the counts it is computed from
-    ("18 / 340 = 5.29%"), so a reader never has to guess the numerator or the denominator.
+    One value per cell: the A / B columns hold the step's counts, the "% of" column names the base
+    step (whose own counts are on its row), and the rate columns hold only the rate.
     """
     variations = sorted(totals)
     if CONTROL_VARIATION not in totals or len(variations) < 2:
@@ -304,8 +297,8 @@ def build_landing_steps_table(totals: Mapping[int, Mapping[str, float]]) -> str:
             r0 = x0 / n0 * 100 if n0 > 0 else None
             r1 = x1 / n1 * 100 if n1 > 0 else None
             row[1] = STEP_BASES.get(step.denominator, step.denominator)
-            row[4] = _rate_cell(x0, n0, r0)
-            row[5] = _rate_cell(x1, n1, r1)
+            row[4] = format_value(RATE, r0)
+            row[5] = format_value(RATE, r1)
             if r0 is not None and r1 is not None:
                 row[6] = format_diff(RATE, r0, r1) if r0 else ""
                 row[7] = significance_cell(_proportion_pvalue(x0, n0, x1, n1), r1 - r0, step.positive)
@@ -524,8 +517,7 @@ def build_crm_report_code(
             _paragraph(
                 "Members who opened the CRM landing from a campaign of this send within the window. "
                 "Step by step: at each step we count who bought there, and only those who did not buy "
-                "go on. Each rate is a share of the step in the \u201c% of\u201d column and shows the two "
-                "counts it is computed from. Where a purchase happened = the step of the last Landing "
+                "go on. Each rate is a share of the step named in the \u201c% of\u201d column. Where a purchase happened = the step of the last Landing "
                 "Checkout View before it (paywall = a payment button on the paywall itself, otherwise "
                 "checkout). A purchase before the first Landing Ambulance View counts for the main "
                 "offer, after it for the emergency offer. Bought = web PURCHASE_SUCCESS. Apple Pay / "

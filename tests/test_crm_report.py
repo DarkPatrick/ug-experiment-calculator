@@ -89,9 +89,9 @@ class LandingTablesTest(unittest.TestCase):
         # an optional step that is zero in both variations is dropped (tap on the emergency offer)
         self.assertFalse(any("on the emergency offer" in label for label in labels))
         checkout = next(row for row in cells if "went to checkout" in row[0])
-        # the rate names its base and shows both counts: 100 / (500 - 1)
+        # the rate names its base; one value per cell: 100 / (500 - 1)
         self.assertEqual(checkout[1], "Did not buy on the paywall")
-        self.assertEqual(checkout[4], "100 / 499 = 20.04%")
+        self.assertEqual(checkout[4], "20.04%")
         self.assertTrue(checkout[7].startswith("\U0001F534"))
         # a count-only step has no base and no rate
         self.assertEqual(cells[1][1], "")
