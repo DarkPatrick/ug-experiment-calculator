@@ -4,9 +4,9 @@ with
         select
             `dt`,
             `variation`,
-            uniqIf(`unified_id`, `has_no_active_pro_rights`) as `x1_users`,
-            uniqIf(`unified_id`, `has_no_active_pro_rights` and `tour_install_pro_trial_dt` > 0) as `x2_users`,
-            uniqIf(
+            uniqExactIf(`unified_id`, `has_no_active_pro_rights`) as `x1_users`,
+            uniqExactIf(`unified_id`, `has_no_active_pro_rights` and `tour_install_pro_trial_dt` > 0) as `x2_users`,
+            uniqExactIf(
                 `unified_id`,
                 `has_no_active_pro_rights`
                 and `tour_install_pro_trial_dt` > 0
@@ -15,12 +15,12 @@ with
                     `tour_instant_offer_charge_dts`
                 )) > 0
             ) as `x3_users`,
-            uniqIf(
+            uniqExactIf(
                 `unified_id`,
                 `has_no_active_pro_rights`
                 and `has_tour_install_subscription` = 0
             ) as `x4_users`,
-            uniqIf(
+            uniqExactIf(
                 `unified_id`,
                 `has_no_active_pro_rights`
                 and `has_tour_install_subscription` = 0
