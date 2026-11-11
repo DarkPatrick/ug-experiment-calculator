@@ -19,6 +19,16 @@ def _placeholders(sql: str) -> set[str]:
     return {name for _, name, _, _ in string.Formatter().parse(sql) if name}
 
 
+class ExactCountsTest(unittest.TestCase):
+    # exp 8168 (2026-11-11): uniq() is approximate above ~65k values, so `members` of a 2.1M-recipient
+    # variation came out 1.2% higher than the recipients, and every Members -> rate was understated.
+    def test_metric_queries_count_exactly(self) -> None:
+        for name in ("monetization_metrics.sql", "tour_subscription_funnels.sql"):
+            sql = (QUERIES_DIR / name).read_text()
+            self.assertNotRegex(sql, r"\buniq(If)?\(", name)
+            self.assertIn("uniqExact", sql, name)
+
+
 class CrmSubscriptionDedupTest(unittest.TestCase):
     # exp 8168 (2026-11-05): a subscription matched two recipients who share a device or a payment
     # account; charges were counted once (uniq per variation) but revenue twice (per-member sums).
