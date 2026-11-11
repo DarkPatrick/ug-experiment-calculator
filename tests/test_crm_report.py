@@ -93,6 +93,10 @@ class LandingTablesTest(unittest.TestCase):
         self.assertEqual(checkout[1], "Did not buy on the paywall")
         self.assertEqual(checkout[4], "20.04%")
         self.assertTrue(checkout[7].startswith("\U0001F534"))
+        # every base of a rate is itself a row of the funnel, so its counts are on the page
+        numerators = {step.numerator for step in crm_report.LANDING_STEPS}
+        denominators = {step.denominator for step in crm_report.LANDING_STEPS if step.denominator}
+        self.assertEqual(denominators - numerators, set())
         # a count-only step has no base and no rate
         self.assertEqual(cells[1][1], "")
         self.assertEqual(cells[1][4], "")
