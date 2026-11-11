@@ -204,6 +204,8 @@ LANDING_STEPS = [
     FunnelStep("Tapped Apple Pay / Google Pay on the paywall", "wallet_tap_paywall", "opened_paywall", 1, optional=True),
     FunnelStep("Bought right on the paywall (button on the paywall, no checkout)", "bought_paywall", "opened_paywall", 1),
     FunnelStep("of them with Apple Pay / Google Pay", "bought_paywall_wallet", "wallet_tap_paywall", 2, optional=True),
+    # count-only row: the base of the checkout rate, so its denominator is on the page (one value per cell)
+    FunnelStep("Did not buy on the paywall", "not_bought_paywall", None, 1),
     FunnelStep("Did not buy on the paywall, went to checkout", "went_checkout", "not_bought_paywall", 1),
     FunnelStep("Bought on checkout", "bought_checkout", "went_checkout", 2),
     FunnelStep("of them with Apple Pay / Google Pay on checkout", "bought_checkout_wallet", None, 3),
