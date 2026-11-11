@@ -83,15 +83,19 @@ class LandingTablesTest(unittest.TestCase):
         totals = crm_report.landing_totals(_steps_frame())
         self.assertAlmostEqual(totals[1]["opened_paywall"], 500)
         cells = _cells(crm_report.build_landing_steps_table(totals))
-        self.assertEqual(cells[0], ["Step", "A", "B", "A, %", "B, %", "diff, %", "p-value"])
+        self.assertEqual(cells[0], ["Step", "% of", "A", "B", "A, %", "B, %", "diff, %", "p-value"])
         labels = [row[0].replace(" ", "").replace("↳ ", "") for row in cells[1:]]
         self.assertEqual(labels[0], "Opened paywall")
         # an optional step that is zero in both variations is dropped (tap on the emergency offer)
-        self.assertNotIn("Tapped Apple Pay / Google Pay on the emergency offer, % of saw", labels)
+        self.assertFalse(any("on the emergency offer" in label for label in labels))
         checkout = next(row for row in cells if "went to checkout" in row[0])
-        # % of not bought on paywall: 100 / (500 - 1)
-        self.assertEqual(checkout[3], "20.04%")
-        self.assertTrue(checkout[6].startswith("\U0001F534"))
+        # the rate names its base and shows both counts: 100 / (500 - 1)
+        self.assertEqual(checkout[1], "Did not buy on the paywall")
+        self.assertEqual(checkout[4], "100 / 499 = 20.04%")
+        self.assertTrue(checkout[7].startswith("\U0001F534"))
+        # a count-only step has no base and no rate
+        self.assertEqual(cells[1][1], "")
+        self.assertEqual(cells[1][4], "")
 
     def test_short_table(self) -> None:
         cells = _cells(crm_report.build_landing_short_table(crm_report.landing_totals(_steps_frame())))
@@ -100,7 +104,7 @@ class LandingTablesTest(unittest.TestCase):
 
 
 class ReportBlockTest(unittest.TestCase):
-    def test_block_order_and_no_collapsible_sections(self) -> None:
+    def test_block_order_and_significance_expands(self) -> None:
         exp_info = {"id": 8018, "date_start": 1789139767, "date_end": 1789139800, "variations": 2,
                     "attribution_window_seconds": 259200}
         code = crm_report.build_crm_report_code(
@@ -113,9 +117,12 @@ class ReportBlockTest(unittest.TestCase):
             today=datetime.date(2026, 9, 18),
         )
         headings = re.findall(r"<h\d>(.*?)</h\d>", code)
-        self.assertEqual(headings, ["Decision", "Next steps", "Email campaign", "Landing funnel", "After Click",
-                                    "After Split", "Insights", "Insight summary"])
-        self.assertNotIn("ui-expand", code)
+        self.assertEqual(headings, ["Decision", "Next steps", "Significance analysis", "Insights", "Insight summary"])
+        expands = re.findall(r'<ac:parameter ac:name="title">(.*?)</ac:parameter>', code)
+        self.assertEqual(expands, ["Email campaign", "Landing funnel", "After Click", "After Split"])
+        # the per-block descriptions stay, the per-block questions are gone
+        self.assertIn("Purchases attributed to a campaign of this send that the recipients clicked.", code)
+        self.assertNotIn("Q:", code)
         self.assertIn("Split 2026-09-11, read on day 7 (2026-09-18), attribution window 3 days (to 2026-09-14).", code)
         self.assertIn("A = control (variation 1), B = test (variation 2).", code)
 
