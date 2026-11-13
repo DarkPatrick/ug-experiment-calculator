@@ -2,8 +2,9 @@
 
 The CRM team's template (Confluence "UG AI Analytics & CRM", page 852003068) differs from the
 monetization report: no Forecast / Design vs Reality / per-client expands, the decision first, then
-Email campaign, Landing funnel (a step-by-step funnel plus a short version), After Click and After
-Split tables, then Insights. Every A/B table has the rows A, B, ``diff, %`` and ``p-value`` with
+Email campaign, Landing funnel (a step-by-step funnel plus a short version) and After Click tables,
+then Insights. After Split is not part of this first read: its trials need time to mature, so it is
+published later as a separate post-analysis block (``get_crm_after_split_post_analysis_code``). Every A/B table has the rows A, B, ``diff, %`` and ``p-value`` with
 the metrics in columns (the landing funnel has steps in rows), diffs are relative except money
 (in $), absolute money and ARPPU are whole dollars, revenue per 1000 delivered keeps two decimals,
 and a tested cell is marked 🟢 significantly better / 🔴 significantly worse / ⬜ not significant.
@@ -257,6 +258,8 @@ def _proportion_pvalue(x0: float, n0: float, x1: float, n1: float) -> float | No
 
 def landing_totals(steps: pd.DataFrame, platform: str = "all") -> dict[int, dict[str, float]]:
     """Per-variation counts of crm_landing_steps.sql for one device (or all), plus derived steps."""
+    if steps.empty or "variation" not in steps.columns:
+        return {}
     frame = steps if platform == "all" else steps[steps["platform"] == platform]
     totals: dict[int, dict[str, float]] = {}
     for variation, group in frame.groupby("variation"):
@@ -402,6 +405,8 @@ def read_latest_results(exp_id: int, segment: str, config: ExperimentCalculatorC
 
 
 def _stat(stats: pd.DataFrame, metric: str) -> dict[int, float]:
+    if stats.empty or "metric" not in stats.columns:
+        return {}
     rows = stats[stats["metric"] == metric]
     return {int(row.variation): float(row.value) for row in rows.itertuples()}
 
@@ -471,20 +476,33 @@ def money_columns(stats: pd.DataFrame, results: pd.DataFrame, extra: pd.DataFram
 
 # --- the block ------------------------------------------------------------------------------------
 
-def header_paragraph(exp_info: Mapping[str, Any], *, today: Optional[datetime.date] = None) -> str:
+POST_ANALYSIS_NOTE = "After Split follows as a post-analysis once trials mature."
+AFTER_SPLIT_DESCRIPTION = "Pure-CRM purchases (utm_medium = crm) of every recipient of the split."
+
+
+def _read_day(exp_info: Mapping[str, Any], today: Optional[datetime.date]) -> tuple[datetime.date, datetime.date, int]:
+    """Split date (the mass send, else ``date_start``), read date and day number of the read."""
     split_ts = int(exp_info.get("crm_send_ts") or exp_info["date_start"])
     split = datetime.datetime.fromtimestamp(split_ts, datetime.timezone.utc).date()
-    window_end = split + datetime.timedelta(seconds=attribution_window_seconds(dict(exp_info)))
     today = today or datetime.datetime.now(datetime.timezone.utc).date()
-    day = (today - split).days
-    read = f"read on day {day} ({today:%Y-%m-%d})" if day >= 7 else f"interim read on day {day} ({today:%Y-%m-%d}), the final read is on day 7"
+    return split, today, (today - split).days
+
+
+def header_paragraph(exp_info: Mapping[str, Any], *, today: Optional[datetime.date] = None) -> str:
+    split, today, day = _read_day(exp_info, today)
+    window_end = split + datetime.timedelta(seconds=attribution_window_seconds(dict(exp_info)))
+    # A read on the window-end date itself is not interim: the CRM run starts after the window closed.
+    if today < window_end:
+        read = f"interim read on day {day} ({today:%Y-%m-%d}) before the attribution window closes"
+    else:
+        read = f"read on day {day} ({today:%Y-%m-%d})"
     variations = int(exp_info.get("variations") or 2)
     labels = ", ".join(
         f"{variant_label(v)} = {'control' if v == CONTROL_VARIATION else 'test'} (variation {v})" for v in range(1, variations + 1)
     )
     return _paragraph(
         f"Split {split:%Y-%m-%d}, {read}, attribution window {CRM_ATTRIBUTION_WINDOW_DAYS} days "
-        f"(to {window_end:%Y-%m-%d}). Redash experiment id {int(exp_info['id'])}. {labels}."
+        f"(to {window_end:%Y-%m-%d}). {POST_ANALYSIS_NOTE} Redash experiment id {int(exp_info['id'])}. {labels}."
     )
 
 
@@ -493,12 +511,14 @@ def build_crm_report_code(
     *,
     email_table: str,
     after_click_table: str,
-    after_split_table: str,
     landing_steps_table: str = "",
     landing_short_table: str = "",
     today: Optional[datetime.date] = None,
 ) -> str:
-    """Assemble the Results block from already rendered tables (pure, for tests and previews)."""
+    """Assemble the first-read Results block from already rendered tables (pure, for tests and previews).
+
+    After Split is not in this block; it is published later by ``build_crm_after_split_post_analysis_code``.
+    """
     blocks = [
         header_paragraph(exp_info, today=today),
         _heading(2, "Decision"),
@@ -534,10 +554,6 @@ def build_crm_report_code(
             _paragraph("Purchases attributed to a campaign of this send that the recipients clicked."),
             after_click_table,
         ])),
-        _ui_expand("After Split", "\n".join([
-            _paragraph("Pure-CRM purchases (utm_medium = crm) of every recipient of the split."),
-            after_split_table,
-        ])),
         _heading(2, "Insights"),
         _heading(3, "Insight summary"),
     ])
@@ -550,7 +566,7 @@ def get_crm_experiment_confluence_report_code(
     include_landing_funnel: bool = True,
     config: Optional[ExperimentCalculatorConfig] = None,
 ) -> str:
-    """The CRM Results block for a calculated CRM experiment.
+    """The CRM first-read Results block (no After Split) for a calculated CRM experiment.
 
     ``include_landing_funnel=False`` drops the Landing funnel for a test that does not touch the
     paywall or checkout (an email-only test shows the same funnel in every variation).
@@ -566,7 +582,6 @@ def get_crm_experiment_confluence_report_code(
     click_stats, click_results = read_latest_results(output_exp_id, CRM_SEGMENT_CAMPAIGN, cfg)
     variations = sorted(int(v) for v in split_stats["variation"].unique()) if not split_stats.empty else [1, 2]
 
-    split_extra = get_crm_extra_metrics(exp_id, segment=CRM_SEGMENT_CRM, config=cfg)
     click_extra = get_crm_extra_metrics(exp_id, segment=CRM_SEGMENT_CAMPAIGN, config=cfg)
 
     landing_steps_table = landing_short_table = ""
@@ -579,7 +594,58 @@ def get_crm_experiment_confluence_report_code(
         exp_info,
         email_table=build_ab_table(email_columns(split_stats, split_results), variations),
         after_click_table=build_ab_table(money_columns(click_stats, click_results, click_extra, with_clicks=True), variations),
-        after_split_table=build_ab_table(money_columns(split_stats, split_results, split_extra, with_clicks=False), variations),
         landing_steps_table=landing_steps_table,
         landing_short_table=landing_short_table,
+    )
+
+
+def build_crm_after_split_post_analysis_code(
+    exp_info: Mapping[str, Any],
+    *,
+    after_split_table: str,
+    today: Optional[datetime.date] = None,
+) -> str:
+    """Assemble the After Split post-analysis block from a rendered table (pure, for tests and previews).
+
+    Heading, one header line, the After Split expand and an empty ``Post-analysis summary`` slot that
+    the analyst fills in.
+    """
+    _, today, day = _read_day(exp_info, today)
+    return "\n".join([
+        _heading(2, "Post-analysis"),
+        _paragraph(f"After Split read on day {day} ({today:%Y-%m-%d}). Redash experiment id {int(exp_info['id'])}."),
+        _ui_expand("After Split", "\n".join([
+            _paragraph(AFTER_SPLIT_DESCRIPTION),
+            after_split_table,
+        ])),
+        _heading(3, "Post-analysis summary"),
+    ])
+
+
+def get_crm_after_split_post_analysis_code(
+    exp_id: int,
+    *,
+    config: Optional[ExperimentCalculatorConfig] = None,
+) -> str:
+    """The After Split post-analysis block (segment ``CRM purchases``) of a calculated CRM experiment.
+
+    Raises ``ValueError`` for a non-CRM experiment, right after the experiment-metadata lookup and
+    before any results table is read.
+    """
+    from .crm_metrics import get_crm_extra_metrics
+    from .repository import get_experiment
+
+    cfg = config or ExperimentCalculatorConfig.from_env()
+    exp_info = get_experiment(exp_id, config=cfg)
+    if not exp_info.get("is_crm"):
+        raise ValueError(f"Experiment {exp_id} is not a CRM experiment")
+    output_exp_id = int(exp_info.get("output_exp_id", exp_info["id"]))
+
+    split_stats, split_results = read_latest_results(output_exp_id, CRM_SEGMENT_CRM, cfg)
+    variations = sorted(int(v) for v in split_stats["variation"].unique()) if not split_stats.empty else [1, 2]
+    split_extra = get_crm_extra_metrics(exp_id, segment=CRM_SEGMENT_CRM, config=cfg)
+
+    return build_crm_after_split_post_analysis_code(
+        exp_info,
+        after_split_table=build_ab_table(money_columns(split_stats, split_results, split_extra, with_clicks=False), variations),
     )
